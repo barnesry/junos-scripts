@@ -1,0 +1,120 @@
+/*
+
+	Title:
+	This script is meant to be run post-ZTP boot from a remote server. 
+	The configuration (specified below) is contained in the final configuration push to the target device. It will then immediately call the script via refresh, from the sever (the time-interval or delay specified doesn't seem to matter here) at which point the script will download and execute, retrieve it's hostname and snmp location from the committed-configuration, and send a syslog message confirming successful provisioning completion. It will immediately self-destruct by removing itself via the the event-options configuration from the running-configuration such that it only executes once.
+
+	Author : Ryan Barnes
+	Contact : barnesry@juniper.net
+
+	root@ex2200-c-ztp# show | compare
+	[edit]
+	+  event-options {
+	+      generate-event {
+	+          ZTP-COMPLETE time-interval 180;
+	+      }
+	+      policy ZTP-COMPLETE {
+	+          events ZTP-COMPLETE;
+	+          then {
+	+              execute-commands {
+	+                  commands {
+	+                      "op url http://172.16.16.101/ztp-completed.slax";
+	+                  }
+	+              }
+	+          }
+	+      }
+	+  }
+
+
+*/
+
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+import "../import/junos.xsl";
+
+
+match / {
+    <op-script-results> {
+
+    /* Set our event-options variables we want to remove later */
+    var $event-name = 'ZTP-COMPLETE';
+	var $policy-name = 'ZTP-COMPLETE';
+
+	/* Setup our RPC command to retreive the full config */
+	var $command = {
+		<get-configuration database="commited">;
+	}
+
+	/* Retrieve current configuration */
+	var $configuration = jcs:invoke( $command );
+
+	/* Extract the host-name and other variables we're interested in reporting */
+	var $hostname = $configuration/system/host-name;
+	var $snmp-loc = $configuration/snmp/location;
+
+	/* Output to syslog */
+        expr jcs:syslog("external.notice","ZTP Boot completed for " _ $hostname _ " at " _ $snmp-loc _ ".");
+
+
+
+	/* Check if we've still got our event-script enabled in our config */
+	var $check-events-rpc = {
+		<get-configuration database="committed"> {
+			<configuration> {
+				<event-options>;
+			}
+		}
+	}
+
+	/* Retrieve the config */
+	var $config-events = jcs:invoke( $check-events-rpc );
+
+	/* If we have both the generate-event AND matching policy, we'll remove both from the config */
+	if ($config-events/event-options/generate-event[name = $event-name] && $config-events/event-options/policy[name = $policy-name]) {
+
+		expr jcs:output("Removing generate event " _ $event-name _ "and associated policy " _ $policy-name _ "from the configuration...");
+
+		/* Build the configlet we'll apply to remove the config */
+		var $change = {
+			<configuration> {
+				<event-options> {
+                              		<generate-event delete="delete"> {
+						<name> $event-name;
+					}
+					<policy delete="delete"> {
+						<name> $policy-name;
+					}
+                              }
+                        }
+		}
+		/* <output> $change; ## debug only */
+
+		/* Open a connection, and apply the config */
+		var $connection = jcs:open();
+		var $results := { call jcs:load-configuration($connection, $configuration = $change); }
+
+		/* Check for errors */
+		if ( $results//xnm:error ) {
+			for-each( $results//xnm:error ) {
+				/* not to syslog here */
+				<output> messages;
+			}
+		}
+		else {
+			<output> "Event options successfully removed!";
+			expr jcs:syslog("external.notice","Event options successfully removed!");
+		}
+		/* Close the socket */
+		var $close-connection = jcs:close($connection);
+	}
+	else {
+		expr jcs:output('Nothing to do...');
+		expr jcs:syslog("external.notice","Nothing to do...");
+	}
+    }
+}

@@ -1,0 +1,65 @@
+/*
+ *  srx-show-top-applications.slax
+ *
+ *  Created by Ryan Barnes (barnesry@juniper.net) on 20151208.
+ *  Copyright (c) 2015 Juniper Networks. All rights reserved.
+ *
+ *  Version History
+ *  ===============
+ *  v0.1    Initial draft to reveal top applications sorted by usage
+ *
+ */
+
+version 1.0;
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+
+import "../import/junos.xsl";
+
+/* This is imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "sortby";
+        <description> "Field to sort output by [bytes|sessions] (optional)";
+    }
+}
+param $sortby;
+
+template format_output($line) {
+  <output> jcs:printf("%-30.30s %-10.10s %-15.15s %-10.10s",$line/application-name,$line/sessions,$line/bytes,$line/is_encrypted);
+}
+
+match / {
+    <op-script-results> {
+
+        /* Send JUNOS XML API Element via jcs:invoke */
+        var $results1 = jcs:invoke( "get-appid-application-statistics" );
+
+
+        /* Print our Headers */
+        <output> jcs:printf("%-30.30s %-10.10s %-15.15s %-10.10s", "Application", "Session","Bytes","Encrypted");
+
+        /* Check if we wanted to sort the table before we print it out */
+        if( not ( jcs:empty ( $sortby ) ) ) {
+
+            if ( $sortby == 'bytes' ) {
+                for-each ( $results1//appid-application-statistics ) {
+                    <xsl:sort select="bytes" order="descending" data-type="number">;
+                    call format_output($line = .);
+                }
+            }
+            else if ( $sortby == 'sessions' ) {
+                for-each ( $results1//appid-application-statistics ) {
+                    <xsl:sort select="sessions" order="descending" data-type="number">;
+                    call format_output($line = .);
+                }
+            }
+        } else {
+            for-each ( $results1//appid-application-statistics ) {
+                    call format_output($line = .);
+           }
+        }
+    }
+}

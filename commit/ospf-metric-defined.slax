@@ -1,0 +1,59 @@
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+import "../import/junos.xsl";
+
+/* Written : Ryan Barnes <barnesry@amazon.com>
+ * Date:			Dec 9, 2012
+ */					
+
+/* This commit script will check for a configured metric value on any ospf enabled interface
+ * to ensure we don't remove a metric from an interface accidentally. All intefaces should have
+ * an explicit metric set so as to ensure we do not unintentially take traffic on a link with a default
+ * metric.
+ */
+
+match configuration {
+
+	var $ospf = protocols/ospf;
+
+	for-each ($ospf/area//interface[not(starts-with(name, "lo"))]) {
+			var $ifname = name;
+
+/*
+ * This block will automatically change any interface that's not lo0 defined in protocols/ospf to max-metric
+ * on commit. Uncomment to modify the behavior of this script to do this rather than erroring on commit.
+
+			if (not(metric)) {
+					call jcs:emit-change() {
+							with $message = {
+									expr "Missing explicit metric on ospf inteface ";
+									expr $ifname;
+									expr ". Adding max-metric '65550' to avoid attracting unintentional traffic.";
+							}
+							with $content = {
+									<metric> 65500;
+							}
+					}
+			}
+*/
+
+/*
+ * Thix block will throw a commit error rather than automatically modifying the metric 
+*/
+			if (not(metric)) {
+					<xnm:error> {
+							call jcs:edit-path();
+							call jcs:statement();
+							<message> {
+									expr "Missing explicit metric on ospf interface ";
+									expr $ifname;
+									expr ". You must define an explicit metric on an ospf enabled interface to avoid attracting unintential traffic due to default metrics.";
+							}
+					}
+			}
+	}
+}

@@ -1,0 +1,35 @@
+======================================
+|Commit Failure on no ospf metric set|
+======================================
+barnesry@r3# commit 
+[edit protocols ospf area 0.0.0.0 interface em1.0]
+  'interface em1.0;'
+    Missing explicit metric on ospf interface em1.0. You must define an explicit metric on an ospf enabled interface to avoid attracting unintential traffic due to default metrics.
+error: 1 error reported by commit scripts
+error: commit script failure
+
+[edit]
+
+
+====================================================
+|automatic max-metric re-write on no ospf metric set|
+====================================================
+barnesry@r3# commit    
+[edit protocols ospf area 0.0.0.0 interface em1.0]
+  warning: Missing explicit metric on ospf inteface em1.0. Adding max-metric '65550' to avoid attracting unintentional traffic.
+commit complete
+
+[edit]
+barnesry@r3# show protocols ospf 
+area 0.0.0.0 {
+    interface em0.0 {
+        metric 666;
+    }
+    interface em1.0 {
+        metric 65500;
+    }
+    interface lo0.0 {
+        passive;
+    }
+}
+

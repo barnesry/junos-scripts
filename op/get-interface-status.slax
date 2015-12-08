@@ -1,0 +1,158 @@
+/*
+ *  get_interface_status.slax
+ *
+ *  Created by Todd Okolowicz (tokolowicz@juniper.net) on 20090713.
+ *  Copyright (c) 2011 Juniper Networks. All rights reserved.
+ *
+ *  Version History
+ *  ===============
+ *  v0.1    Initial release (by Todd Okolowicz)
+ *  v0.2    Modified to include vlans on a given port and whether
+ *          or not it was trunked (by Robery Lemm)
+ *  v0.3    Modified to include installed optic by querying hardware output(barnesry@)
+ *      Updated to allow for column sorted output and more friendly traffic level output
+ *
+ */
+
+version 1.0;
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+
+import "../import/junos.xsl";
+
+/* This is imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "interface";
+        <description> "Interface for which to display summary info";
+    }
+    <argument> {
+        <name> "sortby";
+        <description> "Field to sort output by [inbps|outbps|inerror|outerror] (optional)";
+    }
+}
+param $interface;
+param $sortby;
+
+
+template convert_bps($bps) {
+    if ( ($bps >= 1000) && ($bps <= 1000000) ) {
+        expr (round($bps div 1000)) _ "Kbps";
+    }
+    else if (  ($bps > 1000000) && ($bps <= 1000000000) ) {
+        expr (round($bps div 1000000)) _ "Mbps";
+    }
+    else if ($bps > 1000000000)  {
+        expr (round($bps div 1000000000)) _ "Gbps";
+    }
+    else if ( ($bps < 1000) ) {
+        expr round($bps) _ "bps";
+    }
+}
+
+match / {
+    <op-script-results> {
+
+        /* Send JUNOS XML API Element via jcs:invoke */
+        /* var $results1 = jcs:invoke( "get-interface-information" ); */
+
+        /* Send JUNOS XML API Element via jcs:invoke */
+        var $results2 = jcs:invoke( "get-chassis-inventory" );
+
+        var $command-rpc3 = <command> "show interfaces extensive";
+        var $results1 = jcs:invoke( $command-rpc3 );
+
+        /* Interface Regex for parsing */
+            var $int-regex = "[xge][et]-([0-9])/([0-9])/([0-9])";
+
+         /* This is a functional code block that uses a regular
+          * expression to check the interface cli option for correct syntax. I
+          * disabled it and opted for the code block below. The regex is a
+          * hard-coded and does not account for all possible hardware
+          * configurations (i.e. EX3200 vs. EX4200, uplink vs. no uplink, 1GbE
+          * or 10GbE uplink, Virtual Chassis or stand-alone, etc.) It is more
+          * accurate to compare the cli input vs. the list of Ethernet switching
+          * interfaces actually enabled in the system. I left the regex code block
+          * in for code re-use in future scripts and learning purposes.
+
+          * Error check for incorrect interface syntax using a regex.
+            if ( not ( jcs:empty ( $interface ) ) and jcs:empty ( jcs:regex ( "[xg]e-[0-9]/[0-1]/(([0-9])|([1-3][0-9])|(4[0-7])).0", $interface ) ) ) {
+                <xsl:message terminate="yes"> "The interface " _ $interface _ " isn't valid.\nUsage example: op show_interface_status interface ge-0/0/0.0";
+            }
+          */
+
+         var $matching-interface = $results1/physical-interface [ name == $interface ];
+         if( not ( jcs:empty ($interface ) ) and jcs:empty ( $matching-interface ) ) {
+             <xsl:message terminate="yes"> "The interface " _ $interface _ " isn't valid.\nUsage example: op show_interface_status interface ge-0/0/0.0";
+         }
+
+
+
+	/* for each interface, populate an RTF (result tree fragment) and convert to node-set for processing */
+        var $interface-table := {
+            for-each ( $results1/physical-interface [ string-length($interface)==0 or name=$interface ] ) {
+              var $regex-result = jcs:regex($int-regex, name);
+                  var $fpc = $regex-result[2];
+                  var $pic = $regex-result[3];
+                  var $port = $regex-result[4];
+ 	          var $inbps = traffic-statistics/input-bps;
+        	  var $inbps_converted = { call convert_bps($bps = $inbps); };
+          	 var $outbps = traffic-statistics/output-bps;
+          	 var $outbps_converted = { call convert_bps($bps = $outbps); };
+
+              <interface> {
+                <name> name;
+                <description> description;
+                <logical-description> logical-interface [name=name]/description;
+                <inbps> $inbps;
+                <inbps_converted> $inbps_converted;
+                <outbps> $outbps;
+                <outbps_converted> $outbps_converted;
+                <inerror> input-error-list/input-errors;
+                <outerror> output-error-list/output-errors;
+                <status> concat(admin-status, "/", oper-status);
+                <optic> $results2/chassis/chassis-module [name=concat("FPC ",$fpc)]/chassis-sub-module [name=concat("PIC ",$pic)]/chassis-sub-sub-module [name=concat("Xcvr ",$port)]/description;
+              }
+            }
+        }
+
+
+        /* Print our Headers */
+        <output> jcs:printf("%-10.10s %-35.35s %-13.13s %-13.13s %-13.13s %-10.10s %-10.10s %-10.10s %-10.10s", "Interface", "Physical Description","Admin/Oper","InBPS","OutBPS","InError","OutError","Optic" );
+
+        /* Check if we wanted to sort the table before we print it out */
+        if( not ( jcs:empty ( $sortby ) ) ) {
+
+            if ( $sortby == 'inbps' ) {
+                for-each ( $interface-table/interface ) {
+                    <xsl:sort select="inbps" order="descending" data-type="number">;
+                    <output> jcs:printf("%-10.10s %-35.35s %-13.13s %-13.13s %-13.13s %-10d %-10d %-13.13s",name,description,status,inbps_converted,outbps_converted,inerror,outerror,optic);
+                }
+            }
+            else if ( $sortby == 'outbps' ) {
+                for-each ( $interface-table/interface ) {
+                    <xsl:sort select="outbps" order="descending" data-type="number">;
+                    <output> jcs:printf("%-10.10s %-35.35s %-13.13s %-13.13s %-13.13s %-10d %-10d %-13.13s",name,description,status,inbps_converted,outbps_converted,inerror,outerror,optic);
+                }
+            }
+            else if ( $sortby == 'inerror' ) {
+                for-each ( $interface-table/interface ) {
+                    <xsl:sort select="inerror" order="descending" data-type="number">;
+                    <output> jcs:printf("%-10.10s %-35.35s %-13.13s %-13.13s %-13.13s %-10d %-10d %-13.13s",name,description,status,inbps_converted,outbps_converted,inerror,outerror,optic);
+                }
+            }
+            else if ( $sortby == 'outerror' ) {
+                for-each ( $interface-table/interface ) {
+                    <xsl:sort select="outerror" order="descending" data-type="number">;
+                    <output> jcs:printf("%-10.10s %-35.35s %-13.13 %-13.13s %-13.13s %-10d %-10d %-13.13s",name,description,status,inbps_converted,outbps_converted,inerror,outerror,optic);
+                }
+            }
+        } else {
+            for-each ( $interface-table/interface ) {
+                    <output> jcs:printf("%-10.10s %-35.35s %-13.13s %-13.13s %-13.13s %-10d %-10d %-13.13s",name,description,status,inbps_converted,outbps_converted,inerror,outerror,optic);
+            }
+        }
+    }
+}

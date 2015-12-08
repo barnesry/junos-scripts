@@ -1,0 +1,139 @@
+version 1.0;
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+/* event script to copy certain "show pfe statistics traffic" counters
+ * into the snmp utility mib (jnxUtilData)
+ *
+ * verify by installing as an op script, calling it and then running:
+ * show snmp mib walk ascii jnxUtilData
+ * show snmp mib walk ascii jnxUtilData | display xml (to see the actual full SNMP OIDs)
+ */
+
+/* Setup the OID we want to to poll for RPD */
+param $mem-oid = 'sysApplElmtRunMemory';
+param $mib-walk-oid = 'sysApplElmtRunName';
+
+
+match / {
+    <op-script-results> {
+    var $rpc = <get-pfe-statistics>;
+        var $out = jcs:invoke($rpc)/pfe-hardware-discard-statistics;
+    var $out2 = jcs:invoke($rpc)/pfe-local-traffic-statistics;
+    var $rpc1 = <request-snmp-utility-mib-set> {
+        <object-type> "counter64";
+        <instance> "pfe-fabric-discard";
+        <object-value> $out/fabric-discard;
+    }
+    var $res1 = jcs:invoke($rpc1);
+    /* bad-route-discard is actually "normally discards" from the show pfe statistics traffic output.
+       nice naming.  */
+        var $rpc2 = <request-snmp-utility-mib-set> {
+                <object-type> "counter64";
+                <instance> "pfe-bad-route-discard";
+                <object-value> $out/bad-route-discard;
+        }
+        var $res2 = jcs:invoke($rpc2);
+
+    var $rpc4 = <request-snmp-utility-mib-set> {
+        <object-type> "counter64";
+        <instance> "hardware-input-drops";
+        <object-value> $out2/hardware-input-drops;
+    }
+    var $res4 = jcs:invoke($rpc4);
+
+    var $rpc5 = <request-snmp-utility-mib-set> {
+                <object-type> "counter64";
+                <instance> "pfe-input-packets";
+                <object-value> $out2/pfe-input-packets;
+        }
+        var $res5 = jcs:invoke($rpc5);
+
+        var $rpc6 = <request-snmp-utility-mib-set> {
+                <object-type> "counter64";
+                <instance> "pfe-output-packets";
+                <object-value> $out2/pfe-output-packets;
+        }
+        var $res6 = jcs:invoke($rpc6);
+
+        var $rpc7 = <request-snmp-utility-mib-set> {
+                <object-type> "counter64";
+                <instance> "info-cell-discard";
+                <object-value> $out/info-cell-discard;
+        }
+        var $res7 = jcs:invoke($rpc7);
+
+
+
+       /* Now for rpd memory - which requires us to walk the processes, pick off the index then query the specific
+          OID for that process */
+
+       /* Set up the RPC call */
+        var $walk-rpc = {
+            <walk-snmp-object> {
+                <snmp-object-name> $mib-walk-oid;
+            }
+        }
+
+        /* Walk the MIB from the OID specified above */
+        var $mib-objects = jcs:invoke( $walk-rpc );
+
+        /* Format output to be snmp-object (as found using | display xml) */
+        <snmp-object-information> {
+
+        /* Find the OID matching our RPD process */
+        for-each ( $mib-objects/snmp-object[object-value == '/usr/sbin/rpd'] ) {
+
+            /* Now we've found our process - we need to build the index to append to the memory OID */
+            for-each ( index ) {
+                <output>  "index value: " _ index;
+                var $index = index;
+            }
+
+            /* We're interested only in the last OID in indicated by the index-name */
+            var $oid = index[index-name == 'sysApplElmtRunIndex'];
+
+            /* output the index value which will allow us to poll rpd process later */
+            var $rpd-index = $oid/index-value;
+
+            /* DEBUG - remove comment block - run as op script */
+            <output> "rpd OID index : " _ $rpd-index;
+        
+
+            var $rpd-oid-mem = $mem-oid _ "." _ $rpd-index;
+            
+            /* DEBUG: uncomment for debug */
+            <output> $rpd-oid-mem;
+
+                /* Get the snmp info for rpd process */
+                var $get-snmp-object-rpc = {
+                <get-snmp-object> {
+                    <name> $rpd-oid-mem;
+                    }
+                }
+
+                var $rpd-mem-snmp = $get-snmp-object-rpc;
+
+                /* Make the RPC call to pull our data */
+                var $result = jcs:invoke($rpd-mem-snmp);
+
+                /* DEBUG - remove comment block - run as op script
+               Display the XML output of the OID we just gathered */
+                <output> "rpd memory(KB) : " _ $result/snmp-object/object-value;
+           
+
+
+            /* Write this to the utility MIB */
+            var $rps3 = <request-snmp-utility-mib-set> {
+            <object-type> "counter64";
+            <instance> "rpd-memory";
+            <object-value> $result/snmp-object/object-value;
+            }
+            var $res3 = jcs:invoke($rps3);
+        }
+        }
+    }
+}

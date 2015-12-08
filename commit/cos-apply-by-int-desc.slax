@@ -1,0 +1,76 @@
+/*
+ * cos-apply-by-int-desc.slax
+ *
+ * Written : Ryan Barnes (barnesry@juniper.net)
+ *
+ * Description : Proof of concept to apply a class-of-service using an apply-group
+ * 		 to an interface based on the interface description.
+ *
+ * Version	Date		Notes
+ *   0.1	01June2015	Functional draft (needs further error checking work)
+ *
+ * 		 
+*/
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+import "../import/junos.xsl";
+
+var $int-desc1 = "FAB:T";
+var $int-desc2 = "AMAZON:V";
+var $int-desc3 = "AE";
+var $int-desc4 = "GTT:V";
+var $int-desc5 = "L3:V";
+var $int-desc6 = "TELIASONERA:V";
+var $int-desc7 = "COGENT:V";
+var $apply-group-target = "COS-EXTERNAL-PR-BR";
+
+match configuration {
+    var $cos-all = class-of-service;
+      for-each (interfaces/interface) {
+        var $ifname = name;
+        var $cos = $cos-all/interfaces/interface[name = $ifname];
+      
+
+        /* If it's not an AE interface and there's no matching config in the $cos tree, then... */
+        if ( not($ifname[contains(., "ae")]) && not($cos) ) {
+
+            /* 
+               Check to see if the descriptions are interesting enough to add COS config for
+               I grouped these in two's for readability, but could be combined into a single statement.
+            */
+            if (description[contains(., $int-desc1)] || description[contains(., $int-desc2)] )  {
+ 
+              call apply-config($cos-all, $apply-group-target, $ifname);
+            }
+            else if (description[contains(., $int-desc4)] || description[contains(., $int-desc5)] )  {
+ 
+              call apply-config($cos-all, $apply-group-target, $ifname);
+            }        
+            else if (description[contains(., $int-desc6)] || description[contains(., $int-desc7)] )  {
+ 
+              call apply-config($cos-all, $apply-group-target, $ifname);
+            }
+        }
+    }
+}
+
+
+template apply-config($cos-all, $apply-group-target, $ifname) {
+
+  call jcs:emit-change($dot = $cos-all) {
+    with $message = {
+      expr "Adding " _ $apply-group-target _ " for " _ $ifname _ " to class-of-service";
+    }
+    with $content = {
+      <interfaces> {
+        <interface> {
+          <name>$ifname;
+            <apply-groups>$apply-group-target;
+        }
+      }
+    }
+  }
+}

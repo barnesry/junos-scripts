@@ -1,0 +1,133 @@
+/* 	Author : Ryan Barnes [barnesry@juniper.net]
+
+	This script will apply a specific apply-group to a given ge- interface based on the defined 'description' based on regex match.  The application of the config will not take place if there is already references to the apply-group under the interface stanza. This script does not currently remove any existing apply-groups when configuration is applied. 
+
+  Disclaimer : This script does NOT currently remove config if the description is modified.
+
+
+  ++++++++++++++++++
+
+  barnesry@vSRX-1# delete interfaces ge-0/0/0 apply-groups
+
+  [edit]
+  barnesry@vSRX-1# delete interfaces ge-0/0/1 apply-groups
+
+  [edit]
+  barnesry@vSRX-1# commit
+  [edit interfaces interface ge-0/0/0]
+    warning: Adding APPLY-COS to ge-0/0/0.
+  [edit interfaces interface ge-0/0/1]
+    warning: Adding APPLY-COS-AGG to ge-0/0/1.
+  commit complete
+
+  [edit]
+  barnesry@vSRX-1# run show interfaces descriptions
+  Interface       Admin Link Description
+  ge-0/0/0        up    up   FAB:T blahblahblah
+  ge-0/0/1        up    up   AGG:blah
+  ge-0/0/2        up    up   ACCESS:dldldl
+
+
+  ## Here is the match required to find the apply-group under [interfaces/interface]
+
+  barnesry@vSRX-1# show interfaces ge-0/0/0 | display commit-scripts view
+  <rpc-reply xmlns:junos="http://xml.juniper.net/junos/12.1X47/junos">
+      <configuration junos:changed-seconds="1437671163" junos:changed-localtime="2015-07-23 17:06:03 UTC">
+          <interfaces>
+              <interface>
+                  <name>ge-0/0/0</name>
+                  <description>FAB:T blahblahblah</description>
+                  <unit>
+                      <name>0</name>
+                      <family>
+                          <inet>
+                              <no-redirects/>
+                              <filter junos:group="APPLY-COS">
+                                  <input junos:group="APPLY-COS">
+                                      <filter-name junos:group="APPLY-COS">CLASSIFY</filter-name>
+                                  </input>
+                              </filter>
+                              <address>
+                                  <name>192.168.56.101/24</name>
+                              </address>
+                          </inet>
+                      </family>
+                  </unit>
+              </interface>
+          </interfaces>
+      </configuration>
+      <cli>
+          <banner>[edit]</banner>
+      </cli>
+  </rpc-reply>
+
+  [edit]
+
+*/
+
+	
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+import "../import/junos.xsl";
+
+var $int-desc = "FAB:T";
+var $apply-group-target = "APPLY-COS";
+var $apply-group-target-agg = "APPLY-COS-AGG";
+
+match configuration {
+   var $int = interfaces;
+
+   /* check all interfaces that start with "ge-" (can be modified to check any other types if needed) */
+   for-each ($int/interface[starts-with(name, "ge-")]) {
+      var $ifname = name;
+      var $description = description;
+
+      /* Check if the description matches AND the apply-group isn't already applied */
+      if (jcs:regex("FAB:T", $description) && count(.//filter[@junos:group=$apply-group-target]) ==
+ 0) {
+
+      	/* DEBUG
+             	<xnm:warning> {
+        	<message> "Fabric : " _ $description _ ".";
+              }
+      	*/
+
+      	call apply-cos($apply-group = $apply-group-target, $ifname, $int);
+
+      }
+      /* Check if the description matches "AGG" AND the apply-group isn't already applied */
+      else if (jcs:regex("AGG", $description) && count(.//filter[@junos:group=$apply-group-target-agg]) == 0) {
+
+        /*	var $num = count(.//filter[@junos:group=$apply-group-target-agg]); */
+
+        /*	DEBUG
+        	<xnm:warning> {
+        		<message> "Aggregation : " _ $description;
+                }
+        */
+
+        call apply-cos($apply-group = $apply-group-target-agg, $ifname, $int);
+
+      }
+   }
+}
+
+/* Function call to apply config  */
+template apply-cos($apply-group, $ifname, $int) {
+
+     call jcs:emit-change($dot = $int) {
+        with $message = {
+          expr "Adding "_ $apply-group _ " to " _ $ifname _ ".";
+
+        }
+        with $content = {
+            <interface> {
+                <name>$ifname;
+                <apply-groups>$apply-group;
+            }
+        }
+     }
+
+}

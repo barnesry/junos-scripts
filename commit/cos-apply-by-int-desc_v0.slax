@@ -1,0 +1,52 @@
+/*
+ *  cos-apply-by-desc_v0.slax
+ *
+ *  Written : Ryan Barnes (barnesry@juniper.net)
+ *
+ *  Version   Date        Notes
+ *  =============================================
+ *    0.1     01June2015  Initial Draft
+ *
+ *  Description
+ *  Commit script to set a specific CoS based on a configured interface description
+ *
+*/
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+import "../import/junos.xsl";
+
+/*  Matches any interface with a description of $int-desc and will apply class-of-service
+    policy stanza for that interface if not present during commit
+*/
+
+var $int_desc = "WAN_";
+
+match configuration {
+    var $cos-all = class-of-service;
+    for-each (interfaces/interface[contains(description, $int_desc)]/unit[family/inet]) {
+        var $ifname = ../name;
+        var $unit = name;
+        var $cos = $cos-all/interfaces/interface[name = $ifname];
+        if (not($cos/unit[name = $unit])) {
+            call jcs:emit-change($dot = $cos-all) {
+                with $message = {
+                    expr "Adding CoS forwarding class for ";
+                    expr $ifname _  '.' _  $unit;
+                }
+                with $content = {
+                    <interfaces> {
+                        <interface> {
+                                <name> $ifname;
+                                <unit> {
+                                        <name> $unit;
+                                        <forwarding-class> "fc-q3";
+                                }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

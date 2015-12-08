@@ -1,0 +1,140 @@
+/*
+ *  test-tdr.slax
+ *
+ *  This script is meant to execute and return the results of an interface
+ *  specific TDR test on an EX switch within JunOS Space application.
+ *
+ *  Version History
+ *  ===============
+ *  v0.1    Initial release (by Ryan Barnes)
+ *
+ */
+
+version 1.0;
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+
+import "../import/junos.xsl";
+
+
+/* This is imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "interface";
+        <description> "Interface on which to run TDR command";
+    }
+}
+param $interface;
+
+/* our sleep timer to wait to retrieve our TDR results */
+param $sleep = 60;
+
+template validate-interface-argument($interface) {
+    /* Send JUNOS XML API Element via jcs:invoke */
+    /* We'll use the output of his command later to validate interface arguement collected at runtime */
+    var $results1 = jcs:invoke( "get-interface-information" );
+
+    /* Interface Regex for parsing */
+    var $int-regex = "[xge][et]-([0-9])/([0-9])/([0-9])";
+
+    /* DEBUG */
+    /* <output> $interface; */
+    /* <output> $results1/physical-interface [ name == $interface ]/name/text(); */
+
+    /* check we matched the interface provided with one retrieved from a 'show interface' output */
+    var $matching-interface = $results1/physical-interface [ name == $interface ]/name/text();
+    if( not ( jcs:empty ($interface ) ) and jcs:empty ( $matching-interface ) ) {
+        <xsl:message terminate="yes"> "The interface " _ $interface _ " provided isn't valid.\nUsage example: op test-tdr interface ge-0/0/0";
+    } else {
+        /* not sure if this is how to return true/false in slax */
+        expr true();
+    }
+
+}
+
+template request-tdr($interface = "") {
+    
+    if ($interface) {
+
+        /* Run our command if it wasn't terminated already in the validation process */
+        var $rpc2 = {
+            <request-tdr-interface-diagnostics> {
+                <interface-name> $interface;
+            }
+        }
+        var $results2 = jcs:invoke( $rpc2 );
+        <output> $results2;
+
+    } else {
+
+        /* Run our command if it wasn't terminated already in the validation process */
+        var $rpc2 = "request-tdr-interface-diagnostics";
+        var $results2 = jcs:invoke( $rpc2 );
+        <output> $results2;
+    }
+}
+
+template get-tdr-results($interface = "") {
+
+    /* run the command on all interfaces if one wasn't supplied specifically */
+    if ($interface) {
+        var $rpc1 = {
+            <get-tdr-interface-status> {
+                <interface-name> $interface;
+            }
+        }
+        var $results = jcs:invoke( $rpc1 );
+        copy-of $results;
+    
+    } else {
+
+        /* assume we're calling this on all interfaces */
+        var $rpc1 = "get-tdr-interface-information";
+        var $results = jcs:invoke( $rpc1 );
+        copy-of $results;
+    }
+
+}
+match / {
+    <op-script-results> {
+
+        if ($interface) {
+    
+            expr jcs:output("Checking " _ $interface _ " is valid on this platform.");
+            /* check the interface is valid on this platform */
+            call validate-interface-argument($interface);
+
+            /* DEBUG */
+            /* <output> "Interface : " _ $interface; */
+
+            expr jcs:output("Interface " _$interface _ " is valid, requesting TDR test...");
+            call request-tdr($interface);
+            
+            expr jcs:output("TDR request made for " _ $interface _ ". Waiting " _ $sleep _ "sec to retrieve results...\n");
+
+            /* wait for the command to complete */
+            expr jcs:sleep( $sleep );
+
+            /* Let's retrieve the results */
+            call get-tdr-results($interface);
+            
+
+        } else {
+
+        
+            /* assume we want to execute on all interfaces */
+            expr jcs:output("No interface supplied. Requesting TDR for all interfaces...");
+            call request-tdr();
+
+            /* wait for the command to complete */
+            expr jcs:output("TDR request made for ALL interfaces. Waiting " _ $sleep * 4 _ "sec to retrieve results...\n");
+            expr jcs:sleep( $sleep * 4 );
+
+            /* Let's retrieve and display the results */
+            call get-tdr-results();
+
+        }
+    }
+}
