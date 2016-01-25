@@ -42,7 +42,7 @@ match / {
         <output> jcs:printf("%-30.30s %-10.10s %-15.15s %-10.10s", "Application", "Session","Bytes","Encrypted");
 
         /* Check if we wanted to sort the table before we print it out */
-        if( not ( jcs:empty ( $sortby ) ) ) {
+        if ( not ( jcs:empty ( $sortby ) ) ) {
 
             if ( $sortby == 'bytes' ) {
                 for-each ( $results1//appid-application-statistics ) {
