@@ -7,6 +7,7 @@ from jnpr.junos.utils.config import Config
 from jnpr.junos.exception import *
 from jnpr.junos import Device
 from pprint import pprint as pp
+from lxml import etree
 
 def getArguments():
     parser = argparse.ArgumentParser()
@@ -59,7 +60,6 @@ def loadConfig(dev, configfile):
             unlockConfig(dev)
 
 
-
 def main():
 
     usage = "Usage: %prog -t <target_IP> -u <username> -p <password>"
@@ -74,17 +74,26 @@ def main():
     connectDevice(dev)
 
     # Bind Config instance to Device instance
-    dev.bind( cu=Config )
+    # dev.bind( cu=Config )
 
     # Lock the configuration
-    lockConfig(dev)
+    # lockConfig(dev)
 
     # Check our diffs
-    print "Displaying Diffs..."
-    dev.cu.pdiff()
+    #print "Displaying Diffs..."
+    #dev.cu.pdiff()
+
+    #invoke the RPC equivalent to "show version"
+    sw = dev.rpc.get_software_information()
+    print(etree.tostring(sw))
+
+    interfaces = dev.rpc.get_interface_information(terse=True)
+    print(etree.tostring(interfaces))
+    # will save a rescue config
+    # result = dev.cli(command="request system configuration rescue save")
 
     # unlock the config
-    unlockConfig(dev)
+    # unlockConfig(dev)
 
 # executes only if not called as a module
 if __name__ == "__main__":
