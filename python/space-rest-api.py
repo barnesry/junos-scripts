@@ -6,10 +6,16 @@
 import urllib
 import urllib2
 import requests
+import argparse
 import ssl
 import base64
+import sys
 from lxml import etree
 from xml.sax.saxutils import unescape
+from pprint import pprint as pp
+
+# we can override this with the -d flag at the commandline
+debug = False
 
 host = '192.168.56.11'
 authKey = base64.b64encode("super:juniper.space.r0cks")
@@ -19,6 +25,7 @@ gcontext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
 gcontext.verify_mode = ssl.CERT_REQUIRED
 gcontext.check_hostname = True
 gcontext.load_verify_locations('/Users/barnesry/Desktop/192.168.56.11.pem')
+
 
 #############
 ## CLASSES ##
@@ -43,6 +50,20 @@ class Device:
 ## FUNCTIONS ##
 ###############
 
+def help():
+    print('''
+    Usage : Send RPC Command for target device via Space REST API.
+
+    Example: space-rest-api.py -c get-license-summary-information
+
+    ''')
+def getArguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--command", dest="rpcCommand", help="rpc request to send to target in quotes", required=True)
+    parser.add_argument("-d", "--debug", help="sets additional verbosity", action="store_true")
+    return parser.parse_args()
+    #pp(args.target)
+
 def submitRestRequest(url, authkey, context):
 
     headers = {"Content-Type":"application/json", "Authorization":"Basic " + authKey}
@@ -61,6 +82,7 @@ def submitRestRequest(url, authkey, context):
     # Open the URL passing the newly built request object, passing SSL context to
     # to modify it's connection behavior
     response = urllib2.urlopen(request, context=gcontext)
+
     return response
 
 def listDevices(host, context):
@@ -106,9 +128,14 @@ def sendRpc(host, device, rpc_command):
     headers = {"Content-Type":"application/vnd.net.juniper.space.device-management.rpc+xml;version=1;charset=UTF-8",
                 "Authorization":"Basic " + authKey}
     #data = { "param":"value"}
-    data = '<netconf><rpcCommands><rpcCommand><![CDATA[<get-system-information/>]]></rpcCommand></rpcCommands></netconf>'
+    data = '<netconf><rpcCommands><rpcCommand><![CDATA[<'+command+'/>]]></rpcCommand></rpcCommands></netconf>'
+
     queue_url = 'https://192.168.56.11/api/hornet-q/queues/jms.queue.testq'
     url = "https://"+host+"/api/space/device-management/devices/"+device.id+"/exec-rpc?queue-url="+queue_url
+
+    if debug:
+        print("Requesting URL : {}".format(url))
+        print("URL Data : {}".format(data))
 
     try:
         r = requests.post(url, data=data, headers=headers, auth=('super', 'juniper.space.r0cks'), verify=False)
@@ -121,6 +148,9 @@ def sendRpc(host, device, rpc_command):
         print r.headers
         print r.text
 
+    if debug:
+        print("Response Body : {}".format(r.text))
+
     # massage our output to standard XML reply
     xml = unescape(r.text, { "&quot;" : '"'}).replace('\n', '')
 
@@ -131,7 +161,13 @@ def sendRpc(host, device, rpc_command):
     # load into the xml parser
     tree = etree.fromstring(clean_xml)
 
-    print tree.find('.//replyMsgData').tag
+    # check for success of our command
+    status = tree.find('.//status').text
+
+    if status == 'Failure':
+        print("Command returned : {}".format(status))
+        sys.exit(1)
+    #print tree.find('.//replyMsgData')
 
     # dump all our attributes we retrieved
     for child in tree.iter():
@@ -166,21 +202,29 @@ def createQueue(host, authKey, context):
 ## MAIN BLOCK  ##
 #################
 def main():
+
+    # retreive our Arguments
+    args = getArguments()
+    command = args.rpcCommand
+
+    # set debug flag if we've specified -d at the commandline
+    if args.debug:
+        global debug
+        debug = True
+
     #url = "https://"+host+"/api/space"
 
     # dump a list of devices to the screen and return an xml fragment
     devicelist = listDevices(host, gcontext)
 
     # Dump our response
-    #print devicelist.info().headers
-    #print devicelist.read()
 
     #sendRpc(host,devicelist[0], 'get-system-information')
 
     # location = createQueue(host,authKey, gcontext)
     #print location
 
-    result = sendRpc(host, devicelist[0], 'get-system-information')
+    result = sendRpc(host, devicelist[1], command)
 
 # executes only if not called as a module
 if __name__ == "__main__":
