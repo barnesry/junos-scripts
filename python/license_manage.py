@@ -1,5 +1,8 @@
 #! /usr/bin/python
 
+# Retreive arbitrary information from remote devices using NETCONF RPC calls
+
+
 import sys
 import argparse
 
@@ -14,6 +17,7 @@ def getArguments():
     parser.add_argument("-t", "--target", dest="target", help="ip_address to connect to", required=True)
     parser.add_argument("-u", "--user", dest="user", help="username to connect", required=True)
     parser.add_argument("-p", "--password", dest="password", help="password to connect", required=True)
+    parser.add_argument("-c", "--command", dest="rpcCommand", help="rpc request to send to target in quotes", required=True)
     return parser.parse_args()
     #pp(args.target)
 
@@ -87,9 +91,14 @@ def main():
     sw = dev.rpc.get_software_information()
     print(etree.tostring(sw))
 
-    interfaces = dev.rpc.get_interface_information(terse=True)
-    print(etree.tostring(interfaces))
-    # will save a rescue config
+    # get interface info
+    #interfaces = dev.rpc.get_interface_information(terse=True)
+
+    # get license info
+    license = dev.rpc.get_license_summary_information()
+
+    print(etree.tostring(license))
+    # will save a rescue config, but complain about it
     # result = dev.cli(command="request system configuration rescue save")
 
     # unlock the config
