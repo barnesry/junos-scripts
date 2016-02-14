@@ -97,7 +97,10 @@ def main():
     # get license info
     license = dev.rpc.get_license_summary_information()
 
+    licese_key = dev.rpc.get_license_key_information()
+
     print(etree.tostring(license))
+    print(etree.tostring(licese_key))
     # will save a rescue config, but complain about it
     # result = dev.cli(command="request system configuration rescue save")
 
