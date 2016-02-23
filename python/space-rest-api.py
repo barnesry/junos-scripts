@@ -10,21 +10,11 @@ import argparse
 import ssl
 import base64
 import sys
+import logging
 from lxml import etree
 from xml.sax.saxutils import unescape
 from pprint import pprint as pp
 
-# we can override this with the -d flag at the commandline
-debug = False
-
-host = '192.168.56.11'
-authKey = base64.b64encode("super:juniper.space.r0cks")
-
-# Build SSL context to load self-signed CA certificate from Space
-gcontext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-gcontext.verify_mode = ssl.CERT_REQUIRED
-gcontext.check_hostname = True
-gcontext.load_verify_locations('/Users/barnesry/Desktop/192.168.56.11.pem')
 
 
 #############
@@ -68,7 +58,8 @@ class Space:
         devices = []
 
         # print some headers
-        print("{:10}{:10}{:10}".format('ID', 'Name', 'IP_Address'))
+        if debug:
+            print("{:10}{:10}{:10}".format('ID', 'Name', 'IP_Address'))
 
         # now parse our devices xml to extract interesting bits
         for device in tree:
@@ -81,7 +72,8 @@ class Space:
 
             devices.append(Device(id,uri,name,ipaddr,serialnumber,platform))
 
-            print("{:10}{:10}{:10}".format(id, name, ipaddr))
+            if debug:
+                print("{:10}{:10}{:10}".format(id, name, ipaddr))
 
         if debug:
             for device in devices:
@@ -98,7 +90,7 @@ class Space:
         url = 'https://'+self.host+'/api/hornet-q/queues'
 
         if debug:
-            print("Calling {} with a payload of \n {}".format(url,payload))
+            logging.debug("Calling {} with a payload of \n {}".format(url,payload))
 
         try:
             r = requests.post(url, data=payload, headers=headers, auth=('super', 'juniper.space.r0cks'), verify=False)
@@ -119,7 +111,7 @@ class Space:
 
     def createQueueConsumer(self, queue):
         url = 'http://'+self.host+'/api/hornet-q/queues/jms.queue.'+queue+'/pull-consumers'
-        print("QueueConsumerRequest : {}".format(url))
+        logging.debug("QueueConsumerRequest : {}".format(url))
 
 
 
@@ -161,7 +153,7 @@ def submitRestRequest(url, authkey, context):
 
     # Open the URL passing the newly built request object, passing SSL context to
     # to modify it's connection behavior
-    response = urllib2.urlopen(request, context=gcontext)
+    response = urllib2.urlopen(request, context=context)
 
     return response
 
@@ -300,12 +292,38 @@ def main(args):
 
     # retreive our Arguments
     args = args
+
+    # set defaults
     command = args.rpcCommand
+    global authKey, host, debug
+    authKey = base64.b64encode("super:juniper.space.r0cks")
+    host = '192.168.56.11'
+    debug = False
 
     # set debug flag if we've specified -d at the commandline
     if args.debug:
-        global debug
         debug = True
+
+    # override target host
+    if args.space_node:
+        host = args.space_node
+
+    # override space authkey
+    if args.authkey:
+        authKey = base64.b64encode(args.authkey)
+
+    # Build SSL context to load self-signed CA certificate from Space
+    gcontext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    gcontext.verify_mode = ssl.CERT_REQUIRED
+    gcontext.check_hostname = True
+    gcontext.load_verify_locations('/Users/barnesry/Desktop/192.168.56.11.pem')
+    logging.debug("Loading certificate from {}".format(args.ssl_certificate))
+
+    # override cert location if passed as args
+    if args.ssl_certificate:
+        gcontext.load_verify_locations(args.ssl_certificate)
+
+
 
 
     instance = Space(host, authKey, gcontext)
@@ -313,10 +331,10 @@ def main(args):
     instance.get_device_list()
 
     # create our queue
-    queue = instance.createQueue('testq47')
-    print("Queue Location : {}".format(queue))
+    #queue = instance.createQueue('testq47')
+    #print("Queue Location : {}".format(queue))
 
-    sys.exit(0)
+    #sys.exit(0)
 
     #sendRpc(host,devicelist[0], 'get-system-information')
 
@@ -325,13 +343,20 @@ def main(args):
 
     #result = sendRpc(host, devicelist[1], command)
     #queue = createQueue(host, authKey, gcontext)
-    result = getSyslogEvents(host, devicelist[1])
+
+    #result = getSyslogEvents(host, devicelist[1])
 
 # executes only if not called as a module
 if __name__ == "__main__":
+
    parser = argparse.ArgumentParser()
+   parser.add_argument("-s", "--space_node", dest="space_node", help="target for REST queries", required=True)
+   parser.add_argument("-a", "--authkey", dest="authkey", help="authentication for Space API represented as a dict. eg. super:juniper123", required=True)
+   parser.add_argument("--cert", dest="ssl_certificate", help=".cer or .pem file for server certificate", required=False)
    parser.add_argument("-c", "--command", dest="rpcCommand", help="rpc request to send to target in quotes", required=True)
    parser.add_argument("-d", "--debug", help="sets additional verbosity", action="store_true")
    args = parser.parse_args()
+
+   logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
    main(args)
