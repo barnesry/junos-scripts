@@ -1,9 +1,11 @@
  /*
-		This script watches for events from RPM (PING)
-    Written: barnesry@
-		Date: 13-Mar-2016
-
-    Manual Trigger : logger -e PING_TEST_FAILED -d daemon -a test-owner=ISP2 -a test-name=icmp-loss
+		* This script watches for events from RPM (PING) and triggers static routes
+		* to go inactive removing them from the multipath default route
+		*
+    * Written: barnesry@
+		* Date: 13-Mar-2016
+		*
+    * Manual Trigger : logger -e PING_TEST_FAILED -d daemon -a test-owner=ISP2 -a test-name=icmp-loss
  */
 
 
@@ -13,7 +15,7 @@ ns junos = "http://xml.juniper.net/junos/*/junos";
 ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
 ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
 ns date = "http://exslt.org/dates-and-times";
-ns sbux = "http://xml.juniper.net/sbux"
+ns siti = "http://xml.juniper.net/siti"
 import "../import/junos.xsl";
 
 
@@ -23,7 +25,7 @@ var $start-time = date:date-time();
 /* test-name */
 var $rpm-probe-owner = "ISP2";
 var $rpm-probe-test = "icmp-loss";
-var $routing-instance-name = "SBUX_STORE_INTERNAL";
+
 
 
 
@@ -135,10 +137,10 @@ match / {
 
 
 
-  template sbux:debug-message($message) {
+template siti:debug-message($message) {
 
       if( $debug ) {
-          expr jcs:syslog( "daemon.debug", "sbux-debug:", $start-time, ": ", $message );
+          expr jcs:syslog( "daemon.debug", "siti-debug:", $start-time, ": ", $message );
       }
   }
 
