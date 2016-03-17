@@ -1,0 +1,181 @@
+ /*
+		This script watches for events from RPM (PING)
+    Written: barnesry@
+		Date: 13-Mar-2016
+
+    Manual Trigger : logger -e PING_TEST_FAILED -d daemon -a test-owner=ISP2 -a test-name=icmp-loss
+ */
+
+
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns date = "http://exslt.org/dates-and-times";
+ns sbux = "http://xml.juniper.net/sbux"
+import "../import/junos.xsl";
+
+
+var $connection = jcs:open();
+var $start-time = date:date-time();
+
+/* test-name */
+var $rpm-probe-owner = "ISP2";
+var $rpm-probe-test = "icmp-loss";
+var $routing-instance-name = "SBUX_STORE_INTERNAL";
+
+
+
+match / {
+	<event-script-results> {
+
+			/* This copies the entire XML contents of <event-script-input> into the
+       * result tree as a child element of <event-script-results>. This will
+       * allow the trigger to dump events to match on in XML format in the
+       * output log. Configure a local output destination in your event-options
+       * to see output in xml format */
+
+			/* copy-of event-script-input; */
+
+      /* Get the test owner from the input-tree */
+      var $test-owner = event-script-input/trigger-event/attribute-list/attribute[name=="test-owner"]/value;
+
+      /* Get the test name from the input-tree */
+      var $test-name = event-script-input/trigger-event/attribute-list/attribute[name=="test-name"]/value;
+
+      /*  DEBUG ONLY
+      var $syslog-output = "Test : " _ $test-owner _ " || TestName: " _ $test-name;
+      expr jcs:syslog( "external.warning", $syslog-output );
+      */
+
+
+
+      /*	Set up our RPC call to grab the RPM config */
+  		var $get-rpm-rpc = <get-configuration inherit="inherit"> {
+  				<configuration> {
+  						<services> {
+  								<rpm>;
+  						}
+  				}
+  		}
+
+  		/* Then we'll make the call to grab this section of the config */
+  		var $rpm-config = jcs:invoke( $get-rpm-rpc );
+
+
+      /* Let's pull the NH from the $test_owner */
+      var $test-nh = $rpm-config/services/rpm/probe[name == $test-owner]/test[name == $test-name]/next-hop;
+
+
+      var $syslog-output = "TestOwner : " _ $test-owner _ " TestName : " _ $test-name _ " NextHop : " _ $test-nh;
+      expr jcs:syslog("external.warning", $syslog-output);
+
+
+      /* Now we need to enumerate static routes for the failed NH and deactivate them */
+
+      /*	Set up our RPC call to grab the routes */
+  		var $get-static-routes-rpc = <get-configuration> {
+  				<configuration> {
+  						<routing-options> {
+  								<static>;
+  						}
+  				}
+  		}
+
+      /* Then we'll make the call to grab this section of the config */
+  		var $static-routes-config = jcs:invoke( $get-static-routes-rpc );
+
+      /* Build an XML fragment of static routes w/ next-hops of our Probe from the config */
+      var $interesting-routes = { call enumerate-interesting-routes($static-routes-config,$test-nh); }
+
+
+      /* Are they already deactivated? If so - we'll complain and exit */
+      var $inactive-results = { call routes-already-inactive($static-routes-config); }
+
+
+
+      var $results := {
+
+        var $configuration = {
+          <configuration> {
+            <routing-options> {
+              <static> {
+
+                  /* Now we need a list of the routes with the NH that just died */
+                  for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
+                    <route inactive="inactive"> {
+                      <name> name;
+                    }
+                  }
+                }
+              }
+            }
+        }
+        copy-of $configuration;
+        <inactive-results> $inactive-results;
+        <interesting-routes> $interesting-routes;
+
+        /* Announce we're making a change to the config */
+        expr jcs:syslog("user.warning", "De-activating NH routes associated with failed RPM probe.");
+
+        /* Open a connection, load config, and close */
+        /* All results are written to the result tree and will be set as the value of the $results variable */
+        var $connection = jcs:open();
+        call jcs:load-configuration( $connection, $configuration, $action = "replace" );
+        copy-of jcs:close( $connection );
+
+
+      }
+      copy-of $results;
+
+
+  	}
+  }
+
+
+
+  template sbux:debug-message($message) {
+
+      if( $debug ) {
+          expr jcs:syslog( "daemon.debug", "sbux-debug:", $start-time, ": ", $message );
+      }
+  }
+
+template check-inactive($enumerated-routes) {
+
+    /* Did we already inactivate these routes? If we did, no need to commit again.
+
+     * Builds an XML frag containing static routes matching the next-hop
+     * of the failed probe. e.g. This will return the following;
+     * <routes>
+     *  <name>10.255.255.1/32</name>
+     *  <name>10.255.255.3/32</name>
+    */
+
+    for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
+
+      if ( .[contains(@inactive, "inactive")]) {
+        0;
+      }
+      else {
+        1;
+      }
+
+        <xsl:message terminate="yes"> "Routes already inactive. Not re-applying configuration.";
+}
+
+template enumerate-interesting-routes($static-routes-config,$test-nh) {
+  /* Builds an XML frag containing static routes matching the next-hop
+   * of the failed probe. e.g. This will return the following;
+   * <routes>
+   *  <name>10.255.255.1/32</name>
+   *  <name>10.255.255.3/32</name>
+  */
+
+  <routes> {
+    for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
+      <name> name;
+    }
+  }
+}

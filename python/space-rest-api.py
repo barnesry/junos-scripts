@@ -294,8 +294,9 @@ def main(args):
     args = args
 
     # set defaults
-    command = args.rpcCommand
     global authKey, host, debug
+
+    command = args.rpcCommand
     authKey = base64.b64encode("super:juniper.space.r0cks")
     host = '192.168.56.11'
     debug = False
