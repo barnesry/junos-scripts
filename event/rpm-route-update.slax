@@ -15,7 +15,8 @@ ns junos = "http://xml.juniper.net/junos/*/junos";
 ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
 ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
 ns date = "http://exslt.org/dates-and-times";
-ns siti = "http://xml.juniper.net/siti"
+ns siti = "http://xml.juniper.net/siti";
+
 import "../import/junos.xsl";
 
 
@@ -54,7 +55,7 @@ match / {
 
 
       /*	Set up our RPC call to grab the RPM config */
-  		var $get-rpm-rpc = <get-configuration inherit="inherit"> {
+  		var $get-rpm-rpc = <get-configuration> {
   				<configuration> {
   						<services> {
   								<rpm>;
@@ -93,45 +94,51 @@ match / {
 
 
       /* Are they already deactivated? If so - we'll complain and exit */
-      var $inactive-results = { call routes-already-inactive($static-routes-config); }
+			var $nh-inactive-route-count = count($static-routes-config/routing-options/static/route[next-hop == $test-nh and @inactive == "inactive"]);
+			var $nh-total-route-count = count($static-routes-config/routing-options/static/route[next-hop == $test-nh]);
+
+			if ( $nh-inactive-route-count == $nh-total-route-count ) {
+				/* we've already deactivated the routes, so we don't need to commit the config again */
+				var $message = "Routes already inactive. No re-commit required. Inactive Routes : " _ $nh-inactive-route-count _ " Total Routes : " _ $nh-total-route-count;
+				<xsl:message terminate="yes"> $message;
+			}
+			else {
+				/* we'll need to commit the config */
+				/* <xsl:message terminate="yes"> "We'd commit the config here."; */
+
+					/* we'll store our results from the commit in the $result variable */
+		      var $results := {
+
+		        var $configuration = {
+		          <configuration> {
+		            <routing-options> {
+		              <static> {
+
+		                  /* Now we need a list of the routes with the NH that just died */
+		                  for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
+		                    <route inactive="inactive"> {
+		                      <name> name;
+		                    }
+		                  }
+		                }
+		              }
+		            }
+		        }
+		        copy-of $configuration;
+
+		        /* Announce we're making a change to the config */
+		        expr jcs:syslog("user.warning", "De-activating NH routes associated with failed RPM probe.");
+
+		        /* Open a connection, load config, and close */
+		        /* All results are written to the result tree and will be set as the value of the $results variable */
+		        var $connection = jcs:open();
+		        call jcs:load-configuration( $connection, $configuration, $action = "replace" );
+		        copy-of jcs:close( $connection );
 
 
-
-      var $results := {
-
-        var $configuration = {
-          <configuration> {
-            <routing-options> {
-              <static> {
-
-                  /* Now we need a list of the routes with the NH that just died */
-                  for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
-                    <route inactive="inactive"> {
-                      <name> name;
-                    }
-                  }
-                }
-              }
-            }
-        }
-        copy-of $configuration;
-        <inactive-results> $inactive-results;
-        <interesting-routes> $interesting-routes;
-
-        /* Announce we're making a change to the config */
-        expr jcs:syslog("user.warning", "De-activating NH routes associated with failed RPM probe.");
-
-        /* Open a connection, load config, and close */
-        /* All results are written to the result tree and will be set as the value of the $results variable */
-        var $connection = jcs:open();
-        call jcs:load-configuration( $connection, $configuration, $action = "replace" );
-        copy-of jcs:close( $connection );
-
-
-      }
-      copy-of $results;
-
-
+		      }
+		      copy-of $results;
+				}
   	}
   }
 
@@ -144,27 +151,21 @@ template siti:debug-message($message) {
       }
   }
 
-template check-inactive($enumerated-routes) {
+template check-inactive($static-routes-config, $test-nh) {
 
-    /* Did we already inactivate these routes? If we did, no need to commit again.
+		var $route-count = count($static-routes-config/routing-options/static/route[next-hop == $test-nh and @inactive == "inactive"]);
 
-     * Builds an XML frag containing static routes matching the next-hop
-     * of the failed probe. e.g. This will return the following;
-     * <routes>
-     *  <name>10.255.255.1/32</name>
-     *  <name>10.255.255.3/32</name>
-    */
-
+    /* Did we already inactivate these routes? If we did, no need to commit again.*/
     for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
 
-      if ( .[contains(@inactive, "inactive")]) {
-        0;
-      }
-      else {
-        1;
-      }
+			if ( current()/@inactive == "inactive") {
+				copy-of current();
+			}
+			<output> "Configuration Applied";
+			copy-of $route-count;
+		}
 
-        <xsl:message terminate="yes"> "Routes already inactive. Not re-applying configuration.";
+      /* <xsl:message terminate="yes"> "Routes already inactive. Not re-applying configuration."; */
 }
 
 template enumerate-interesting-routes($static-routes-config,$test-nh) {
