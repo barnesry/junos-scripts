@@ -6,6 +6,18 @@
 		* Date: 13-Mar-2016
 		*
     * Manual Trigger : logger -e PING_TEST_FAILED -d daemon -a test-owner=ISP2 -a test-name=icmp-loss
+
+			root@SRX100-H2_Branch_1> show configuration routing-options static
+			inactive: route 10.255.255.1/32 next-hop 2.2.2.6;   <---- removed from multipath group
+			route 10.255.255.2/32 next-hop 2.2.2.2;
+			inactive: route 10.255.255.3/32 next-hop 2.2.2.6;   <---- removed from multipath group
+			route 10.255.255.4/32 next-hop 2.2.2.10;
+			route 10.255.255.5/32 next-hop 2.2.2.2;
+			route 0.0.0.0/0 {
+			    next-hop [ 10.255.255.1 10.255.255.2 10.255.255.3 10.255.255.4 10.255.255.5 ];
+			    resolve;
+		}
+
  */
 
 
@@ -15,11 +27,11 @@ ns junos = "http://xml.juniper.net/junos/*/junos";
 ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
 ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
 ns date = "http://exslt.org/dates-and-times";
-ns siti = "http://xml.juniper.net/siti";
+ns my = "http://xml.juniper.net/myfunctions";
 
 import "../import/junos.xsl";
 
-
+/* Globals */
 var $connection = jcs:open();
 var $start-time = date:date-time();
 
@@ -27,8 +39,106 @@ var $start-time = date:date-time();
 var $rpm-probe-owner = "ISP2";
 var $rpm-probe-test = "icmp-loss";
 
+/* Defaults and Settings */
+var $script-name = "rpm-route-update";
+
+/* MIB Variables */
+var $owner-instance = "ISP2";
+var $owner-oid = "jnxUtilStringValue.I.S.P.2";
 
 
+var $event-definition = {
+	<event-options> {
+		<policy> {
+				<name> "rpm-update-default-route";
+				<events> "ping_test_failed";
+				<then> {
+						<event-script> {
+								<name> "rpm-route-update.slax";
+								<output-filename> "rpm-route-update.log";
+								<destination> {
+										<name> "local";
+								}
+								<output-format> "text";
+						}
+				}
+		}
+	}
+	/* These policies block the logging of the commands run by root; otherwise
+   * the syslog will fill up with multiple logs every three seconds
+   */
+  <policy> {
+      <name> "block_snmp_command_logging";
+      <events> "UI_JUNOSCRIPT_CMD";
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.username";
+          <condition> "matches";
+          <to-event-attribute-value> "^root$";
+      }
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.command";
+          <condition> "matches";
+          <to-event-attribute-value> "^get-snmp-object";
+      }
+      <then> {
+          <ignore>;
+      }
+  }
+  <policy> {
+      <name> "block_rpm_command_logging";
+      <events> "UI_JUNOSCRIPT_CMD";
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.username";
+          <condition> "matches";
+          <to-event-attribute-value> "^root$";
+      }
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.command";
+          <condition> "matches";
+          <to-event-attribute-value> "^get-probe-results";
+      }
+      <then> {
+          <ignore>;
+      }
+  }
+  <policy> {
+      <name> "block_utility_mib_command_logging";
+      <events> "UI_JUNOSCRIPT_CMD";
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.username";
+          <condition> "matches";
+          <to-event-attribute-value> "^root$";
+      }
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.command";
+          <condition> "matches";
+          <to-event-attribute-value> "^((request-snmp-utility-mib-clear)|(request-snmp-utility-mib-set))";
+      }
+      <then> {
+          <ignore>;
+      }
+  }
+  <policy> {
+      <name> "block_get_configuration_command_logging";
+      <events> "UI_JUNOSCRIPT_CMD";
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.username";
+          <condition> "matches";
+          <to-event-attribute-value> "^root$";
+      }
+      <attributes-match> {
+          <from-event-attribute> "UI_JUNOSCRIPT_CMD.command";
+          <condition> "matches";
+          <to-event-attribute-value> "^get-configuration";
+      }
+      <then> {
+          <ignore>;
+      }
+  }
+}
+
+/* Set to true() if you want to see debug trace messages. Set to false() otherwise */
+var $debug = false();
 
 match / {
 	<event-script-results> {
@@ -40,6 +150,17 @@ match / {
        * to see output in xml format */
 
 			/* copy-of event-script-input; */
+
+			/* Report debug mode in case it was left in place accidentally */
+	    if( $debug ) {
+	        expr jcs:syslog( "daemon.notice", $script-name, " is running in debug mode" );
+	    }
+
+	    /* Dampen to only once per minute in case scripts get executed too close together */
+	    if( not( jcs:dampen( "rpm-route-update", 1, 1 ) ) ) {
+	        expr jcs:syslog( "daemon.notice", "Rate-limiting start of ", $script-name );
+	        <xsl:message terminate="yes"> "Rate-limiting start of " _ $script-name;
+	    }
 
       /* Get the test owner from the input-tree */
       var $test-owner = event-script-input/trigger-event/attribute-list/attribute[name=="test-owner"]/value;
@@ -117,7 +238,8 @@ match / {
 		                  /* Now we need a list of the routes with the NH that just died */
 		                  for-each ( $static-routes-config/routing-options/static/route[next-hop == $test-nh] ) {
 		                    <route inactive="inactive"> {
-		                      <name> name;
+		                      <junos:comment> "Changed by " _ $script-name;
+													<name> name;
 		                    }
 		                  }
 		                }
@@ -143,13 +265,6 @@ match / {
   }
 
 
-
-template siti:debug-message($message) {
-
-      if( $debug ) {
-          expr jcs:syslog( "daemon.debug", "siti-debug:", $start-time, ": ", $message );
-      }
-  }
 
 template check-inactive($static-routes-config, $test-nh) {
 
