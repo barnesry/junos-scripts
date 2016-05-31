@@ -22,7 +22,7 @@ import "../import/junos.xsl";
 /* param $neighbor = "10.0.0.200"; */
 
 
-/* Embedded event policy
+/* Embedded event policy */
 var $event-definition = {
 	<event-options> {
 		<policy> {
@@ -39,9 +39,14 @@ var $event-definition = {
 				}
 			}
 		}
+		<destinations> {
+			<name> "local";
+			<archive-sites> {
+				<name> "/var/log/event-option-output";
+			}
+		}
 	}
 }
-*/
 
 /* Embedded event policy 
 var $event-definition = {

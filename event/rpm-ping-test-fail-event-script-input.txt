@@ -2,29 +2,29 @@ root@SRX100-H2_Branch_1% cat SRX100-H2_Branch_1_rpm-route-update.log_20160316_05
 <event-script-results>
 <event-script-input>
 <trigger-event>
-<id>PING_TEST_FAILED</id>
-<type>syslog</type>
-<generation-time junos:seconds="1458107718">
-2016-03-15 22:55:18 PDT
-</generation-time>
-<process>
-<name>rmopd</name>
-<pid>1436</pid>
-</process>
-<hostname>SRX100-H2_Branch_1</hostname>
-<message>PING_TEST_FAILED: pingCtlOwnerIndex = ISP2, pingCtlTestName = icmp-loss</message>
-<facility>daemon</facility>
-<severity>info</severity>
-<attribute-list>
-<attribute>
-<name>test-owner</name>
-<value>ISP2</value>
-</attribute>
-<attribute>
-<name>test-name</name>
-<value>icmp-loss</value>
-</attribute>
-</attribute-list>
+  <id>PING_TEST_FAILED</id>
+  <type>syslog</type>
+  <generation-time junos:seconds="1458107718">
+  2016-03-15 22:55:18 PDT
+  </generation-time>
+  <process>
+  <name>rmopd</name>
+  <pid>1436</pid>
+  </process>
+  <hostname>SRX100-H2_Branch_1</hostname>
+  <message>PING_TEST_FAILED: pingCtlOwnerIndex = ISP2, pingCtlTestName = icmp-loss</message>
+  <facility>daemon</facility>
+  <severity>info</severity>
+  <attribute-list>
+    <attribute>
+    <name>test-owner</name>
+    <value>ISP2</value>
+    </attribute>
+    <attribute>
+    <name>test-name</name>
+    <value>icmp-loss</value>
+    </attribute>
+  </attribute-list>
 </trigger-event>
 <junos-context>
 <hostname>SRX100-H2_Branch_1</hostname>
