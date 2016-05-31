@@ -1,4 +1,4 @@
-/* 
+/*
 		* Lookup the description of the BGP peer which changed state, and output to syslog
 		* The intention is to alarm on TRANSIT peers - and ignore the rest, so this script
 		* is meant to assist our NMS in determining which alarms to trigger on.
@@ -6,7 +6,7 @@
 		Written: barnesry@
 		Date: 26-Nov-2012
 
-		Portions of this script gleaned from 
+		Portions of this script gleaned from
 		http://www.juniper.net/us/en/community/junos/script-automation/library/configuration/show-bgp-policy/
 */
 
@@ -23,6 +23,7 @@ import "../import/junos.xsl";
 
 
 /* Embedded event policy */
+/* Will dump script output to local file /var/log/escript.log */
 var $event-definition = {
 	<event-options> {
 		<policy> {
@@ -42,33 +43,18 @@ var $event-definition = {
 		<destinations> {
 			<name> "local";
 			<archive-sites> {
-				<name> "/var/log/event-option-output";
+				<name> "/var/log";
 			}
 		}
 	}
 }
 
-/* Embedded event policy 
-var $event-definition = {
-    <event-options> {
-        <policy> {
-            <name> "bgp_event_lookup";
-            <events> "rpd_bgp_neighbor_state_changed";
-            <then> {
-                <event-script> {
-                    <name> "bgp_event_lookup.slax";
-                }
-            }
-        }
-    }
-}
-*/
 
 match / {
 	<event-script-results> {
-		/* 
+		/*
 			*This copies the entire XML contents of <event-script-input> into the result
-			*tree as a child element of <event-script-results>. This will allow the trigger to dump 
+			*tree as a child element of <event-script-results>. This will allow the trigger to dump
 			*events to match on in XML format in the output log.
 
 			copy-of event-script-input;
@@ -88,13 +74,16 @@ match / {
 				out the IP address for use in our lookup.
 		 */
 		var $pattern = "([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) (.*)";
+		var $peer-as-pattern = "([0-9]+)\)$";
 
 		var $peer-name-result = jcs:regex($pattern, $peer-name);
-		
+		var $peer-as-result = jcs:regex($peer-as-pattern, $peer-name);
+
 		/* The array returned from $peer-name-result, 1 matches full string, 2 matches our first
-				block of parenthesis, 3 matches second block of parentheses, etc... 
-		*/		
+				block of parenthesis, 3 matches second block of parentheses, etc...
+		*/
 		var $neighbor = $peer-name-result[2];
+		var $peer-as = $peer-as-result[2];
 
 		/*	First we'll set up our RPC call */
 		var $get-bgp-rpc = <get-configuration inherit="inherit"> {
@@ -108,32 +97,33 @@ match / {
 		/* Then we'll make the call to grab this section of the config */
 		var $bgp-config = jcs:invoke( $get-bgp-rpc );
 
-    
+
 		/*
-     	 	* The BGP neighbor is extracted from the configuration through a location path.  The last() 
-        * function is used to guarantee that only one element node will be returned.  It returns true 
-        * only if the node is the last in the node list so only one node can be selected and assigned to 
+     	 	* The BGP neighbor is extracted from the configuration through a location path.  The last()
+        * function is used to guarantee that only one element node will be returned.  It returns true
+        * only if the node is the last in the node list so only one node can be selected and assigned to
         * $bgp-neighbor.
     */
         var $bgp-neighbor = $bgp-config/protocols/bgp//neighbor[name == $neighbor ][last()];
-        
-    /* 
+
+    /*
         * Error check, if the $bgp-neighbor is missing than jcs:empty() will return true and the script
         * will be terminated with an error message.
     */
         if( jcs:empty( $bgp-neighbor ) ) {
             <xsl:message terminate="yes"> "BGP Neighbor " _ $neighbor _ " isn't configured.";
         }
-        
-    /* 
+
+    /*
         * Begin the output.  The BGP neighbor will be shown first as well as the BGP group it is in.
-    */      
-        <output> "Peer Name : " _ $peer-name _ " old-state: " _ $old-state _ " new-state: " _ $new-state; 
+    */
+        <output> "Peer Name : " _ $peer-name _ " old-state: " _ $old-state _ " new-state: " _ $new-state;
         <output> "BGP Neighbor: " _ $neighbor _ " in group " _ $bgp-neighbor/../name;
- 
-		var $syslog_output = "BGP_ADJ_CHANGE : " _ $neighbor _ " -  " _ $bgp-neighbor/description _" changed state from "_ $old-state _ " to " _ $new-state;
+		<output> "BGP PeerAS: " _ $peer-as;
+
+		var $syslog_output = "BGP_ADJ_CHANGE : " _ $neighbor _ " -  " _ $bgp-neighbor/description _" changed state from "_ $old-state _ " to " _ $new-state _ ". PeerAS: " _ $peer-as;
 
 		/* Now we'll emit the updated syslog which will include the BGP Neighbor Description */
-		expr jcs:syslog( "external.warning", $syslog_output );	
-	}	
+		expr jcs:syslog( "external.warning", $syslog_output );
+	}
 }
