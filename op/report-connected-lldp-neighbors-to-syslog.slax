@@ -1,0 +1,68 @@
+/*
+    * Author        :   Ryan Barnes
+    * Date          :   2016-June-30
+    * Description   :
+        This script will check for a connected upstream neighbor
+        on $UPLINK_IF, check this neighbor contains "srx100h2" in it's neighbors
+        description and return the value of the upstream neighbor hostname if a
+        match is found.
+
+        We expect ZTP to have obtained an IP address on our EX2200 (used for testing)
+        so we'll also return the IP assigned to $BOOT_IF.
+
+        For identification purposes, we'll also return the chassis-description and
+        serial-number.
+
+    * Expected Output
+      Jul 17 23:10:26   cscript: ztp-config: ZTP Boot completed for EX2200-48P-4G : CT0213051609 connected to GM112233 with a DHCP IP address of 192.168.255.100/24.
+
+*/
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+import "../import/junos.xsl";
+
+var $SYSLOG_TAG = "ztp-config: ";
+var $SYSLOG = "external.notice";
+var $UPLINK_IF = 'ge-0/0/47';
+var $BOOT_IF = 'vlan.0';
+
+
+match / {
+    <op-script-results> {
+
+    /*  Set up our RPC call to grab the LLDP neighbors */
+    var $get-lldp-rpc = <get-lldp-interface-neighbors-information> {
+                            <interface-name> $UPLINK_IF;
+                        }
+    var $get-lldp-neighbors = jcs:invoke( $get-lldp-rpc );
+
+    /* Now we want the hostname from our upstream SRX so we'll look only for that */
+    var $lldp-neighbor-hostname = $get-lldp-neighbors/lldp-neighbor-information[contains(lldp-system-description/lldp-remote-system-description, 'srx100h2')]/lldp-remote-system-name;
+
+    /* next we want our IP address obtained on default vlan.0 via DHCP */
+    var $get-int-terse-rpc = {
+        <get-interface-information> {
+            <terse>;
+            <interface-name> $BOOT_IF;
+        }
+    }
+    var $get-int-terse = jcs:invoke( $get-int-terse-rpc );
+    var $boot-ip = $get-int-terse/logical-interface/address-family[address-family-name == 'inet']/interface-address/ifa-local;
+
+     /* copy-of $get-int-terse; ## debug-only */
+
+    /* Collect our chassis info */
+    var $get-chassis-inventory-rpc = <get-chassis-inventory>;
+    var $get-chassis-inventory = jcs:invoke( $get-chassis-inventory-rpc );
+    var $chassis-description = $get-chassis-inventory/chassis/description;
+    var $chassis-serial = $get-chassis-inventory/chassis/serial-number;
+
+     /* Output to syslog */
+     expr jcs:syslog($SYSLOG, $SYSLOG_TAG, "ZTP Boot completed for " _ $chassis-description _ " : " _ $chassis-serial _ " connected to " _ $lldp-neighbor-hostname _ " with a DHCP IP address of " _ $boot-ip _ ".");
+    }
+}
