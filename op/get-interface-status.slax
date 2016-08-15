@@ -12,6 +12,13 @@
  *  v0.3    Modified to include installed optic by querying hardware output(barnesry@)
  *      Updated to allow for column sorted output and more friendly traffic level output
  *
+ * vSRX-NAT-GW> op get-interface-status
+ * Interface  Physical Description                Admin/Oper    InBPS         OutBPS        InError    OutError   Optic
+ * ge-0/0/0   Entered by Pyez Jinja2 Template     up/up         21Kbps        20Kbps        0          0
+ * gr-0/0/0                                       up/up         0bps          0bps
+ * ip-0/0/0                                       up/up         0bps          0bps
+ * lsq-0/0/0                                      up/up         0bps          0bps
+ * lt-0/0/0                                       up/up         0bps          0bps          0          0
  */
 
 version 1.0;
