@@ -8,6 +8,9 @@
  *  v0.1    Initial Release (barnesry@)
  *          Supports IPv4 inet.0 RIB values, sorting of columns
  *
+ * barnesry@vSRX-1> op get-bgp-neighbors
+ * Peer            ASN   Group                Description               Flaps Rcvd/Acpt/Adv         Last Up/Down State
+ * 10.0.0.2        65002 EBGP                                           8     7/7/7                   5d 9:55:46 Established
  */
 
 version 1.0;

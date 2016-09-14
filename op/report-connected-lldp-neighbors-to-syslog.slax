@@ -1,20 +1,24 @@
 /*
     * Author        :   Ryan Barnes
     * Date          :   2016-June-30
+    * Updated       :   2016-Sept-16
     * Description   :
-        This script will check for a connected upstream neighbor
-        on $UPLINK_IF, check this neighbor contains "srx100h2" in it's neighbors
-        description and return the value of the upstream neighbor hostname if a
-        match is found.
+        This script will check for a connected upstream neighbor(s)
+        on $uplink-interface (optional), and return the value of the connected neighbor
+        hostname(s).
 
         We expect ZTP to have obtained an IP address on our EX2200 (used for testing)
-        so we'll also return the IP assigned to $BOOT_IF.
+        so we'll also return the IP assigned to $boot-interface along w/ any assigned IP address.
 
         For identification purposes, we'll also return the chassis-description and
         serial-number.
 
+    * Script Inputs
+        boot-interface : interface to report DHCP aquisition for in syslog
+        uplink-interface : specific interface to report LLDP connected neighbor on. Defaults to ALL
+
     * Expected Output
-      Jul 17 23:10:26   cscript: ztp-config: ZTP Boot completed for EX2200-48P-4G : CT0213051609 connected to GM112233 with a DHCP IP address of 192.168.255.100/24.
+      Jul  3 08:31:14  EX2200-C-12P cscript: ztp-config: ZTP Boot completed for EX2200-C-12T-2G : GP0214373245 connected to [ lldp-neighbor-count : 4, lldp-neighbors : SRX210-HUB via ge-0/0/11.0, SRX210-HUB via ge-0/0/3.0, SRX210-HUB via ge-0/0/6.0, EX2200-C-12P via ge-0/0/9.0 ] with a DHCP IP address of 192.168.57.10/24 on me0.0.
 
 */
 
@@ -28,33 +32,72 @@ import "../import/junos.xsl";
 
 var $SYSLOG_TAG = "ztp-config: ";
 var $SYSLOG = "external.notice";
-var $UPLINK_IF = 'ge-0/0/47';
-var $BOOT_IF = 'vlan.0';
+
+/* This is imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "uplink-interface";
+        <description> "Specify specific interface to return LLDP info on. Defaults to ALL";
+    }
+    <argument> {
+        <name> "boot-interface";
+        <description> "Interface expected to obtain IP Address via DHCP on first boot (typically vlan.0 or me0.0)";
+    }
+}
+param $uplink-interface;
+param $boot-interface;
 
 
 match / {
     <op-script-results> {
 
-    /*  Set up our RPC call to grab the LLDP neighbors */
-    var $get-lldp-rpc = <get-lldp-interface-neighbors-information> {
-                            <interface-name> $UPLINK_IF;
-                        }
-    var $get-lldp-neighbors = jcs:invoke( $get-lldp-rpc );
+    
+    /* get our LLDP neighbors */
+    <output> "Gathering LLDP Neighbor Details...";
+    var $lldp-syslog-message = {
+        if ( $uplink-interface) {
 
-    /* Now we want the hostname from our upstream SRX so we'll look only for that */
-    var $lldp-neighbor-hostname = $get-lldp-neighbors/lldp-neighbor-information[contains(lldp-system-description/lldp-remote-system-description, 'srx100h2')]/lldp-remote-system-name;
+            /* Single interface detected */
+            var $lldp-neighbor-details := { call get-lldp-neighbor-details($uplink-interface); }
+            
+            /* DEBUG */
+            /* copy-of $lldp-neighbor-details; */
 
-    /* next we want our IP address obtained on default vlan.0 via DHCP */
-    var $get-int-terse-rpc = {
-        <get-interface-information> {
-            <terse>;
-            <interface-name> $BOOT_IF;
+            var $results = call print-lldp-info($lldp-neighbor-details);
+            /* return our syslog formatted output */
+            expr $results;
+
+        } else {
+            /* Multiple interfaces (default) chosen */
+            var $lldp-neighbor-details := { call get-lldp-neighbor-details(); }
+            var $results = call print-lldp-info($lldp-neighbor-details);
+            /* return our syslog formatted output */
+            expr $results;
         }
+    }
+    
+
+    /* OPTIONAL : Filter by upstream device-type */
+    /* var $lldp-neighbor-hostname = $lldp-neighbor-details/lldp-neighbor-information[contains(lldp-system-description/lldp-remote-system-description, 'srx100h2')]/lldp-remote-system-name; */
+    
+    /* Set default boot_interface if none provided */
+    var $boot-if = {
+        /* if boot interface wasn't provided, we'll default */
+        if ( not($boot-interface) ) {
+            expr "vlan.0";
+        } else {
+            expr $boot-interface;
+        }
+    }
+    var $get-int-terse-rpc = {
+            <get-interface-information> {
+                <terse>;
+                <interface-name> $boot-if;
+            }
     }
     var $get-int-terse = jcs:invoke( $get-int-terse-rpc );
     var $boot-ip = $get-int-terse/logical-interface/address-family[address-family-name == 'inet']/interface-address/ifa-local;
 
-     /* copy-of $get-int-terse; ## debug-only */
 
     /* Collect our chassis info */
     var $get-chassis-inventory-rpc = <get-chassis-inventory>;
@@ -63,6 +106,81 @@ match / {
     var $chassis-serial = $get-chassis-inventory/chassis/serial-number;
 
      /* Output to syslog */
-     expr jcs:syslog($SYSLOG, $SYSLOG_TAG, "ZTP Boot completed for " _ $chassis-description _ " : " _ $chassis-serial _ " connected to " _ $lldp-neighbor-hostname _ " with a DHCP IP address of " _ $boot-ip _ ".");
+     var $message = { expr "ZTP Boot completed for " _ $chassis-description _ " : " _ $chassis-serial _ " connected to " _ $lldp-syslog-message _ " with a DHCP IP address of " _ $boot-ip _ " on " _ $boot-if _ "."; }
+     expr jcs:syslog($SYSLOG, $SYSLOG_TAG, $message);
+     <output> $message;
     }
+}
+
+template get-lldp-neighbor-details($uplink-interface = '') {
+
+    /* Get LLDP Neighbors */
+    if ( $uplink-interface ) {
+        /*  Set up our RPC call to return the LLDP neighbors on a specific interface */
+        var $get-lldp-rpc = <get-lldp-interface-neighbors-information> {
+                                <interface-name> $uplink-interface;
+                            }
+        var $lldp-neighbor-details = jcs:invoke( $get-lldp-rpc );
+        
+        /* write output to results tree */
+        copy-of $lldp-neighbor-details;
+
+    } else {
+        /* We'll report on ALL connected LLDP neighbors */
+        /* first we need to get a list of interfaces with lldp neighbors */
+        var $lldp-neighbors-information-rpc = <get-lldp-neighbors-information>;
+        var $lldp-neighbors-information = jcs:invoke( $lldp-neighbors-information-rpc );
+        
+        if ( $lldp-neighbors-information ) {
+            <output> "Found LLDP Neighbors";
+            
+            /* now we can ask for details on each interface */
+            for-each ( $lldp-neighbors-information/lldp-neighbor-information ) {
+                
+                /*  Set up our RPC call to grab the LLDP neighbor detail */
+                var $get-lldp-rpc = <get-lldp-interface-neighbors-information> {
+                                        <interface-name> lldp-local-interface;
+                                    }
+                var $get-lldp-neighbor-detail = jcs:invoke( $get-lldp-rpc );
+                
+                /* write our detailed results to the results tree */
+                copy-of $get-lldp-neighbor-detail;
+
+            }
+        } else {
+            <output> "No LLDP Neighbors Detected!";
+        }
+    }
+
+    /* we'll automatically return a RTF to the caller with all data */
+    /* we'll need to convert that data back to node-set to use it */
+}
+
+template print-lldp-info($lldp-neighbor-details) {
+    /* takes input from either 'show lldp neighbor' or 'show lldp neighbor interface detail' */
+    /* reports the num_neighbors, and returns a string <remote-device> via <local-interface> */
+    
+    /* DEBUG */
+    /* <output> "Neighbors : " _ count($lldp-neighbor-details/lldp-neighbors-information/lldp-neighbor-information) _ "\n"; */
+    var $count =  count($lldp-neighbor-details/lldp-neighbors-information/lldp-neighbor-information);
+    
+    var $lldp-syslog-output = {
+    /* build response string */
+        expr "[ lldp-neighbor-count : " _ $count;
+        if ( $count == 0 ) {
+            expr " ]";
+        } else {
+            expr ", lldp-neighbors : ";
+            for-each ( $lldp-neighbor-details/lldp-neighbors-information/lldp-neighbor-information ) {
+                expr lldp-remote-system-name _ " via " _ lldp-local-interface;
+                /* comma, except for last item in list */
+                if ( position() < $count ) {
+                    <output> ", ";
+                }
+            }
+            expr " ]";
+        }
+    }
+    /* return string */
+    expr $lldp-syslog-output;
 }
