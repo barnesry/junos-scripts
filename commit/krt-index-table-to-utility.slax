@@ -1,0 +1,52 @@
+/* Author : Ryan Barnes (barnesry@juniper.net)
+ * Date   : 15-March-2017
+ *
+ * Supplimental table to support cross reference of jnxBgpM2PeerRoutingInstance MIB
+ * which outputs a BGP peer and provides a 'routing-instance' index reference, but
+ * no such table exists in production MIBs from which to reference which instance this
+ * peer belongs
+*/
+
+version 1.1;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+
+import "../import/junos.xsl";
+match / {
+    <op-script-results> {
+    var $command="get-krt-tables-information";
+    var $krt = jcs:invoke($command);
+
+    /* if response is empty then exit and terminate */
+    if (jcs:empty($krt)) {
+            <xsl:message terminate="yes"> "Failure to read krt tables";
+    }
+
+    /* get each table and it's index and write to the jnxUtil mib */
+    var $hash := {
+        for-each ($krt/krt-table) {
+            /* split vrfname.inet.0 and only take the first part ref to routing-instance */
+            var $krt-table-name = jcs:split("\\.", krt-table-name);
+            <output> $krt-table-name;
+            var $krt-table-index = krt-table-index;
+            <krt-table name=$krt-table-index> $krt-table-name; 
+            /* var $instance = "krtTableInstance" _ $krt-table-index; */
+            /* call snmp_set($instance = $instance, $value = $krt-table-name); */
+            call snmp_set($instance = $krt-table-index, $type="unsigned-integer", $value = $krt-table-name);
+        }
+    }
+    
+  }
+}
+template snmp_set($instance, $value = "0", $type = "string" ) {
+
+    var $set_rpc = <request-snmp-utility-mib-set> {
+        <object-type> $type;
+        <object-value> $value;
+        <instance> $instance;
+    }
+    var $out = jcs:invoke($set_rpc);
+}
