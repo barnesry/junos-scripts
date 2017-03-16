@@ -31,8 +31,8 @@ ns set = "http://exslt.org/sets";
 
 
 import "../import/junos.xsl";
-match configuration {
-    
+match / {
+    <op-script-results> {
     var $command="get-krt-tables-information";
     var $krt = jcs:invoke($command);
 
@@ -69,6 +69,7 @@ match configuration {
     for-each ($hash/krt-tables/krt-table) {
         call snmp_set($instance = "krtTableInstance" _ index, $value = table-name);
     }
+  }
 }
 template snmp_set($instance, $value = "0", $type = "string" ) {
 
