@@ -2,9 +2,13 @@
  * Date   : 15-March-2017
  *
  * Supplimental table to support cross reference of jnxBgpM2PeerRoutingInstance MIB
- * which outputs a BGP peer and provides a 'routing-instance' index reference, but
- * no such table exists in production MIBs from which to reference which instance this
- * peer belongs
+ * which outputs a BGP peer providing a 'routing-instance' index reference which was never
+ * implemented in production MIBs. 
+ * 
+ * output allows for direct query using base OID + ASCII convertion of index_num [52.48.55.55]
+ * jnxUtilStringValue."krtTableInstance4077" = customer_vrf_4077
+ * jnxUtilStringValue.107.114.116.84.97.98.108.101.73.110.115.116.97.110.99.101.52.48.55.55 = customer_vrf_4077
+ *
 */
 
 version 1.1;
@@ -33,9 +37,8 @@ match / {
             <output> $krt-table-name;
             var $krt-table-index = krt-table-index;
             <krt-table name=$krt-table-index> $krt-table-name; 
-            /* var $instance = "krtTableInstance" _ $krt-table-index; */
-            /* call snmp_set($instance = $instance, $value = $krt-table-name); */
-            call snmp_set($instance = $krt-table-index, $type="unsigned-integer", $value = $krt-table-name);
+            /* should filter unique keys before trying to write to MIB to be more efficient */
+            call snmp_set($instance = "krtTableInstance" _ $krt-table-index, $value = $krt-table-name);
         }
     }
     
