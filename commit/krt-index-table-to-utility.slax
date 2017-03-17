@@ -1,6 +1,14 @@
 /* Author : Ryan Barnes (barnesry@juniper.net)
  * Date   : 15-March-2017
  *
+ * Copyright 2017 Juniper Networks, Inc. All rights reserved.
+ * Licensed under the Juniper Networks Script Software License (the "License"). 
+ * You may not use this script file except in compliance with the License, which is located at 
+ * http://www.juniper.net/support/legal/scriptlicense/
+ * Unless required by applicable law or otherwise agreed to in writing by the parties, software 
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+ * OF ANY KIND, either express or implied.
+ *
  * Supplimental table to support cross reference of jnxBgpM2PeerRoutingInstance MIB
  * which outputs a BGP peer providing a 'routing-instance' index reference which was never
  * implemented in production MIBs. 
@@ -12,8 +20,6 @@
  *
  * Features TBD
  * & cleanup of inserted entries for VRF deletes (does this matter since there wouldn't be a BGP peer to relate to?) 
- *      Does not appear to be supported for string type per:
- *      https://www.juniper.net/documentation/en_US/junos/topics/reference/command-summary/request-snmp-utility-mib-clear-instance.html
  * & improved efficiency before MIB insertion (only unique keys) and 1.1 mutable variables
  *      Complete : using set:distinct to avoid multiple MIB inserts for duplicate keys
  * & run as commit / event / op script depending on need. Seems to make the most sense on commit.

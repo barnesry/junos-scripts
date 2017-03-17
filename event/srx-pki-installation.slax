@@ -1,0 +1,53 @@
+/* Author : Ryan Barnes (barnesry@juniper.net)
+ * Date   : 15-December-2016
+ *
+ * Copyright 2017 Juniper Networks, Inc. All rights reserved.
+ * Licensed under the Juniper Networks Script Software License (the "License"). 
+ * You may not use this script file except in compliance with the License, which is located at 
+ * http://www.juniper.net/support/legal/scriptlicense/
+ * Unless required by applicable law or otherwise agreed to in writing by the parties, software 
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+ * OF ANY KIND, either express or implied.
+ * 
+ * Triggered via event-option to trigger automatic generation of PKI keys for lab SRX. Initial config
+ * drop contains only outbound-ssh {} stanza along with event-option {} to trigger a SCEP request for
+ * certificate signing to allow the device to join an auto-vpn which requires signed endpoint certificates.
+ *
+ */
+ 
+ 
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns date = "http://exslt.org/dates-and-times";
+ns my = "http://xml.juniper.net/myfunctions";
+
+import "../import/junos.xsl";
+
+/* Set to true() if you want to see debug trace messages. Set to false() otherwise */
+var $debug = false();
+
+match / {
+    <op-script-results> {
+
+        if( $debug ) {
+            expr jcs:syslog( "daemon.notice", $script-name, " is running in debug mode" );
+        }
+
+        var $command1 = <command> "request security pki generate-key-pair certificate-id Spoke1 size 2048";
+
+        var $command2 = <command> "request security pki ca-certificate enroll ca-profile csa";
+
+        var $command3 = <command> "request security pki local-certificate enroll ca-profile csa certificate-id Spoke1 domain-name thelab.local email spoke@thelab.local subject DC=thelab,CN=Spoke1,OU=vpntest,O=Juniper,ST=WA,C=US ip-address 10.255.250.1 challenge-password 380EB5B249A8DE3843E44DF8341D8729";
+
+        var $results1 = jcs:invoke($command1);
+        var $results2 = jcs:invoke( $command2 );
+        var $results3 = jcs:invoke( $command3 );
+
+        copy-of $results1;
+        copy-of $results2;
+        copy-of $results3;
+        <output> "Script completed";
+    }
+}
