@@ -35,6 +35,9 @@ ns ext = "http://xmlsoft.org/XSLT/namespace";
 /* You need include this ns to use set:distinct() */
 ns set = "http://exslt.org/sets";
 
+/* open a control connection as we assume we'll be updating some MIBs during this script run */
+/* GLOBAL Scope */
+var $connection = jcs:open();
 
 import "../import/junos.xsl";
 match configuration {
@@ -83,5 +86,5 @@ template snmp_set($instance, $value = "0", $type = "string" ) {
         <object-value> $value;
         <instance> $instance;
     }
-    var $out = jcs:invoke($set_rpc);
+    var $out = jcs:execute($connection, $set_rpc);
 }
