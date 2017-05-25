@@ -1,5 +1,5 @@
 #!/usr/bin/python
-
+#
 # Author: Ryan Barnes [barnesry@juniper.net]
 # Date  :    May 25, 2017
 #
@@ -11,7 +11,8 @@
 #
 # Usage:
 #
-# barnesry-mbp:python barnesry$ ./mac-collection.py
+# barnesry-mbp:python barnesry$ ./mac-collection.py --host 192.168.57.10 --user root
+# Password:
 # Connecting to...192.168.57.10
 # Success!
 # Collecting ethernet-switching table...
@@ -31,6 +32,7 @@
 from jnpr.junos import Device
 from lxml import etree as etree
 from collections import defaultdict
+import argparse, logging, getpass, sys
 
 HOST = '192.168.57.10'
 USER = 'root'
@@ -84,9 +86,13 @@ def ints_with_multiple_macs(interface_list):
         if len(macs) > 1:
             print interface
 
-def main():
+def main(args):
 
-    with Device(host=HOST, user=USER, passwd=PASS) as dev:
+    host = args.host
+    user = args.user
+    password = args.password
+    
+    with Device(host=host, user=user, passwd=password) as dev:
         print "Connecting to...{}".format(dev.hostname)
         dev.open()
         print "Success!"
@@ -103,4 +109,18 @@ def main():
 
 # executes only if not called as a module
 if __name__ == "__main__":
-    main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", dest="host", help="target for connection", required=True)
+    parser.add_argument("--user", dest="user", help="username to connect with", required=False)
+    args = parser.parse_args()
+
+    password = getpass.getpass()
+    args.password = password
+
+    # Change ERROR to INFO or DEBUG for more verbosity
+    logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    # run our main program
+    main(args)
+    
