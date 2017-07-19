@@ -11,8 +11,10 @@ yaml_data="""
 ---
 L2ngEthernetSwitchingTable:
   rpc: get-ethernet-switching-table-information
-  item: l2ng-mac-entry
-  key: l2ng-l2-mac-address
+  item: l2ng-l2ald-mac-entry-vlan/l2ng-mac-entry
+  key:
+    - l2ng-l2-mac-vlan-name
+    - l2ng-l2-mac-address
   view: L2ngEthernetSwitchingTableView
 L2ngEthernetSwitchingTableView:
   fields:
@@ -29,10 +31,10 @@ def main(args):
     user = args.user
     password = args.password
         
-    dev = Device(host=args.host, user=args.user, password=args.password, gather_facts=True)
+    dev = Device(host=args.host, user=args.user, password=args.password, gather_facts=False)
     dev.open()
 
-    print dev.facts
+    # print dev.facts
 
     globals().update(FactoryLoader().load(yaml.load(yaml_data)))
 
@@ -41,14 +43,14 @@ def main(args):
     ethernet_table.get()
 
     # debug
-    print ethernet_table
+    print(ethernet_table.items())
         
-    for mac in ethernet_table:
-            print 'vlan: ', mac.vlan
-            print 'mac_address: ', mac.mac_address
-            print 'flags: ', mac.flags
-            print 'age: ', mac.age
-            print 'logical_interface: ', mac.logical_interface
+    for entry in ethernet_table:
+            print 'vlan: ', entry.vlan
+            print 'mac_address: ', entry.mac_address
+            print 'flags: ', entry.flags
+            print 'age: ', entry.age
+            print 'logical_interface: ', entry.logical_interface
 
     dev.close()
 
