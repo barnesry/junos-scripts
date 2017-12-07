@@ -1,0 +1,76 @@
+/*
+    * Author        :   Ryan Barnes
+    * Date          :   2017-Dec-5
+    * Updated       :
+    * Tested on     :   QFX5200
+    * Description   :
+        This script returns detailed LLDP information for all connected neighbors. Typically this would require
+        two commands;
+
+        show lldp neighbors
+        show lldp interface <local-if> detail
+
+*/
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+import "../import/junos.xsl";
+
+var $SYSLOG_TAG = "ztp-config: ";
+var $SYSLOG = "external.notice";
+
+match / {
+    <op-script-results> {
+
+    /* get our LLDP neighbors */
+    <output> "Gathering LLDP Neighbor Details...";
+
+    var $lldp-neighbor-details := { call get-lldp-neighbor-details(); }
+    copy-of $lldp-neighbor-details;
+
+    }
+}
+
+template get-lldp-neighbor-details() {
+
+    /* Get LLDP Neighbors */
+    /* We'll report on ALL connected LLDP neighbors */
+    /* first we need to get a list of interfaces with lldp neighbors */
+    var $lldp-neighbors-information-rpc = <get-lldp-neighbors-information>;
+    var $lldp-neighbors-information = jcs:invoke( 'get-lldp-neighbors-information' );
+
+    /* Print the standard CLI output to screen for header summary   */
+    /* Detailed info to follow after                                */
+    copy-of $lldp-neighbors-information;
+
+    if ( $lldp-neighbors-information ) {
+
+        /* DEBUG */
+        /* <output> "Neighbors : " _ count($lldp-neighbor-details/lldp-neighbors-information/lldp-neighbor-information) _ "\n"; */
+        var $count =  count($lldp-neighbors-information/lldp-neighbor-information);
+	<output>;
+	<output>;
+        <output> "Found [" _ $count _ "] LLDP Neighbors. Retrieving Details.";
+
+        /* now we can ask for details on each interface */
+        for-each ( $lldp-neighbors-information/lldp-neighbor-information ) {
+
+            /*  Set up our RPC call to grab the LLDP neighbor detail */
+            var $get-lldp-rpc = <get-lldp-interface-neighbors> {
+                                    <interface-device> lldp-local-port-id;
+                                }
+            var $get-lldp-neighbor-detail = jcs:invoke( $get-lldp-rpc );
+
+            /* write our detailed results to the results tree */
+            <output> "==========================================";
+            copy-of $get-lldp-neighbor-detail;
+
+        }
+    } else {
+        <output> "No LLDP Neighbors Detected!";
+    }
+}

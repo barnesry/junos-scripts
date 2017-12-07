@@ -1,0 +1,185 @@
+/*
+*
+* Author: Chris Jenn
+* Date: 20 Mar 2017
+* Version: 1.1
+*
+* Copyright 2017 Juniper Networks, Inc. All rights reserved.
+* Licensed under the Juniper Networks Script Software License (the "License").
+* You may not use this script file except in compliance with the License, which is located at
+* http://www.juniper.net/support/legal/scriptlicense/
+* Unless required by applicable law or otherwise agreed to in writing by the parties, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*
+*
+* Installation steps;
+*
+*  - With root shell access, place this script here: /var/db/scripts/op/krt-index_to_utility_mib.slax
+*  - Configure the following:
+*
+* system {
+*    scripts {
+*         op {
+*             file krt-index_to_utility_mib.slax   << name must match
+*         }
+*     }
+* }
+*
+* event-options {
+*     generate-event {
+*         24hr time-interval 86400;
+*     }
+*     policy krt-index {
+*         events 24hr;
+*         then {
+*             event-script krt-index_to_utility_mib.slax;
+*         }
+*     }
+* }
+*/
+ 
+ 
+/* slax version, not script version */
+version 1.1;
+ 
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns func extension = "http://exslt.org/functions";
+ns jutils = "http://jutils/";
+ns str = "http://exslt.org/strings";
+ns set = "http://exslt.org/sets";
+ 
+import "../import/junos.xsl";
+ 
+var $connection = jcs:open();
+ 
+template check_pid {
+    var $running_pid = jutils:running( $connection, $script );
+    if ( $running_pid ) {
+        <xsl:message terminate="yes"> "terminate script because another instance with pid " _ $running_pid _ " is still running";
+    }
+}
+ 
+template create-list($cmd) {
+ 
+    var $list = jcs:execute($connection, $cmd);
+ 
+    <entry> {
+        <krt-table-index>"0 default";
+    }
+ 
+    for-each ($list//krt-table) {
+ 
+        var $krt_table_name = ./krt-table-name;
+ 
+        if (( ./krt-table-id != 1 ) && ( ./krt-table-index != 0 )) {
+            /* strip all inet.1 and inet6.1 entries, no value gained, only creates duplicates */
+ 
+            var $search_set := {
+                <string> ".inet.0";
+                <string> ".inet6.0";
+                <string> ".vpls.0";
+                <string> ".iso.0";
+                <string> ".mpls.0";
+            }
+ 
+            var $name_redux = str:replace( $krt_table_name, $search_set/string, "");
+            <entry> {
+                <krt-table-index>./krt-table-index _" "_ $name_redux;
+            }
+ 
+        }
+ 
+    }
+ 
+}
+ 
+template clear-all-mib () {
+    var $rpc-walk-mib = <rpc> {
+        <command> "show snmp mib walk jnxUtilStringValue.107.114.116.32.116.97.98.108.101.32.105.110.100.101.120 ascii";
+    }
+    var $util-mib-set = jcs:execute($connection,$rpc-walk-mib);
+    for-each ($util-mib-set//snmp-object) {
+        call clear_util_mib($name=./index/index-value);
+    }
+}
+ 
+template clear_util_mib($name) {
+    var $clear-rpc = <request-snmp-utility-mib-clear> {
+        <object-type> "string";
+        <instance> $name;
+    }
+    var $out = jcs:execute($connection,$clear-rpc);
+}
+ 
+template set_util_mib($index, $name) {
+    var $set-rpc = <request-snmp-utility-mib-set> {
+        <object-type> "string";
+        <instance> "krt table index " _ $index;
+        <object-value> $name;
+    }
+    var $out = jcs:execute($connection,$set-rpc);
+    if ($out//xnm:error) {
+        <xsl:message terminate="yes"> "Error setting Utility MIB instance: " _ $results/..//xnm:error/message;
+    }
+}
+ 
+function jutils:running( $connection, $script ) {
+    /* function to check if another instance of this script is still running
+     *
+     * :param connection: connection handle
+     * :param script: name used to identify the script
+     * :return: pid of running instance or false
+     */
+    mvar $running = false();
+ 
+    var $pid = <pid> $junos-context/pid;
+    var $pid_filename = "/mfs/var/tmp/" _ $script _ ".pid";
+    var $pid_file = document( $pid_filename );
+ 
+    if ( not( jcs:empty( $pid_file//pid ) ) ) {
+        var $processes_rpc = { <command> "show system processes extensive"; }
+        var $processes := jcs:execute( $connection, $processes_rpc );
+        var $processes_lines = jcs:break-lines( $processes );
+ 
+        for-each( $processes_lines ) {
+            if ( jcs:regex( "^[[:blank:][:space:]]*" _ $pid_file//pid _ "[[:blank:][:space:]]+.*cscript.*", . )[1] ) {
+                set $running = true();
+            }
+        }
+    }
+    if ( $running ) {
+        result $pid_file//pid;
+    } else {
+        <xsl:document method="xml" href=$pid_filename append="no"> {
+            copy-of $pid;
+        }
+        result false();
+    }
+}
+ 
+ 
+match / {
+    <op-script-results> {
+        call check_pid;
+ 
+        var $rpc-krt-table = {
+          <command> "show krt table";
+        }
+ 
+        var $table-list := { call create-list($cmd=$rpc-krt-table); }
+        call clear-all-mib;
+ 
+        var $uniq-krt-table-entries = set:distinct($table-list//entry);
+ 
+        for-each ($uniq-krt-table-entries) {
+ 
+            /* expr jcs:output(.); */
+            var $split=jcs:split(" ",.);
+            var $index = $split[1];
+            var $name = $split[2];
+            call set_util_mib($index, $name);
+ 
+        }
+    }
+}
