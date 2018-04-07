@@ -65,7 +65,7 @@ match / {
         
 		/* build a node fragment reporting only the interfaces which flapped in the past X seconds */
         var $flapped := {
-            for-each ($interfaces-results/physical-interface[interface-flapped/@junos:seconds < "23000"]) {
+            for-each ($interfaces-results/physical-interface[interface-flapped/@junos:seconds < "60"]) {
                 
                 /* checks if regex result is not empty ie. if we matched anything */
                 if ( not (jcs:empty( jcs:regex( $int-regex, name) ) )) {
@@ -100,9 +100,18 @@ match / {
         copy-of $config;
 
         /* open a connection, load and commit the change */
+        var $load-action = "merge";
+        var $options := {
+            <commit-options> {
+                <log> "IFDOWN Script Speed Modification";
+            }
+        }
         var $connection = jcs:open();
+        expr jcs:output("connection opened");
+
         var $results := {
-            call jcs:load-configuration( $connection, $config );
+            call jcs:load-configuration( $action=$load-action, $commit-options=$options, 
+                $configuration = $config, $connection = $connection );
             copy-of jcs:close( $connection );
         }
 
@@ -113,7 +122,7 @@ match / {
             }
         }
         else {
-            expr jcs:syslog( "external.notice", "script succes!" );            
+            expr jcs:syslog( "external.notice", "script success!" );            
         }
 
 	}
