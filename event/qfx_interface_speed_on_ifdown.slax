@@ -1,0 +1,120 @@
+/*
+		* Modifies the configured interface speed on ifDOWN to compensate incorrect autoneg
+
+		* Written: barnesry@
+		* Date: 6-Apr-2018
+
+*/
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+import "../import/junos.xsl";
+
+/* useful for inserting value to test from an op script. */
+/* Modify to reflect an IP of a known host on the platform and run as an Op script */
+/* param $neighbor = "10.0.0.200"; */
+
+
+/* Embedded event policy */
+/* Will dump script output to local file /var/log/escript.log */
+var $event-definition = {
+	<event-options> {
+		<policy> {
+			<name> "qfx_interface_speed_on_ifdown";
+            <events> "snmp_trap_link_down";
+            <then> {
+				<event-script> {
+					<name> "qfx_interface_speed_on_ifdown.slax";
+					<output-filename> "qfx_interface_speed_on_ifdown.log";
+						<destination> {
+							<name> "local";
+						}
+					<output-format> "xml";
+				}
+			}
+		}
+		<destinations> {
+			<name> "local";
+			<archive-sites> {
+				<name> "/var/log";
+			}
+		}
+	}
+}
+
+
+match / {
+	<event-script-results> {
+		/*
+			* This copies the entire XML contents of <event-script-input> into the result
+			* tree as a child element of <event-script-results>. This will allow the trigger to dump
+			* events to match on in XML format in the output log. Comment out during normal operation.
+        */
+		/* copy-of event-script-input; */
+
+
+        /* Interface Regex for parsing */
+        var $int-regex = "xe-([0-9])/([0-9])/([0-9]+)";
+
+        /* Get a copy of our interface status */
+        var $interface-rpc = {
+            <get-interface-information>;
+        }	
+        var $interfaces-results = jcs:invoke( $interface-rpc );
+        
+		/* build a node fragment reporting only the interfaces which flapped in the past X seconds */
+        var $flapped := {
+            for-each ($interfaces-results/physical-interface[interface-flapped/@junos:seconds < "23000"]) {
+                
+                /* checks if regex result is not empty ie. if we matched anything */
+                if ( not (jcs:empty( jcs:regex( $int-regex, name) ) )) {
+                    var $name = name;
+                    var $flap = interface-flapped/@junos:seconds;
+
+                    <interface> {
+                        <name> $name;
+                        <flapped> $flap;
+                    }
+                }
+            }
+        }
+
+        copy-of $flapped;
+
+        /* now we hardcode the port speed on all interfaces that flapped recently */
+        var $config = {
+            <configuration> {
+                <interfaces> {
+                    for-each ( $flapped/interface ) { 
+                        var $intname = name;
+                        <interface> {
+                            <name> $intname;
+                            <speed> "10g";
+                        }
+                    }
+
+                }
+            }
+        }
+        copy-of $config;
+
+        /* open a connection, load and commit the change */
+        var $connection = jcs:open();
+        var $results := {
+            call jcs:load-configuration( $connection, $config );
+            copy-of jcs:close( $connection );
+        }
+
+        /* check for errors */
+        if( $results//xnm:error ) {
+            for-each( $results//xnm:error ) {
+                expr jcs:syslog( "external.error", "script error - boo", message );
+            }
+        }
+        else {
+            expr jcs:syslog( "external.notice", "script succes!" );            
+        }
+
+	}
+}
