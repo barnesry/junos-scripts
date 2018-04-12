@@ -41,11 +41,11 @@ import "../import/junos.xsl";
     pausing for $delaytime = 22.5sec ($flaptime - ($flaptime*.25)) to allow sufficient time to collect interface 
     flap counters before the next event window. 
 
-    Written: barnesry@
-    Date      :    6-Apr-2018
-    Modified  :    11-Apr-2018 
-
-    Version:  :   1.0 - Initial Draft
+    Written     :   barnesry@juniper.net
+    Date        :   6-Apr-2018
+    Modified    :   12-Apr-2018 
+    Version:    :   1.0 - Initial Draft
+                    1.1 - Added logic to avoid commit if interface already has config
 
     Log Output to /var/log/<hostname><timestamp><scriptname> on each iteration. jcs:output() goes here.
 
@@ -76,13 +76,13 @@ var $event-definition = {
                 <event-script> {
                     <name> "qfx_interface_speed_on_ifdown.slax";
                     <output-filename> "qfx_interface_speed_on_ifdown.log";
-						<destination> {
-							<name> "local";
-						}
-					<output-format> "xml";
-				}
-			}
-		}
+                        <destination> {
+                            <name> "local";
+                        }
+                    <output-format> "xml";
+                }
+            }
+        }
 		<destinations> {
 			<name> "local";
 			<archive-sites> {
@@ -222,6 +222,5 @@ match / {
             expr jcs:output($message2);
             
         }
-
 	}
 }
