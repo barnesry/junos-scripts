@@ -1,14 +1,22 @@
 /*
-		* Modifies the configured interface speed on ifDOWN to compensate incorrect autoneg
+		* Modifies the configured interface speed on SNMP_TRAP_LINK_DOWN to compensate for incorrect autoneg
 
 		* Written: barnesry@
-		* Date: 6-Apr-2018
+		* Date      :    6-Apr-2018
+        * Modified  :    11-Apr-2018 
+        * 
+        * Version:  :   1.0 - Initial Draft
+
+        * Log Output to /var/log/<hostname><timestamp><scriptname> on each iteration
+        * 
+        * For additional debug enable "event-options traceoptions flag events"
 
 */
-version 1.0;
+version 1.1;
 ns junos = "http://xml.juniper.net/junos/*/junos";
 ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
 ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns my = "http://www.example.com/myfunctions";
 import "../import/junos.xsl";
 
 /* useful for inserting value to test from an op script. */
@@ -23,6 +31,13 @@ var $event-definition = {
 		<policy> {
 			<name> "qfx_interface_speed_on_ifdown";
             <events> "snmp_trap_link_down";
+            <within> {
+                <name> "30";
+                <trigger> {
+                    <on>;
+                    <count> "1";
+                }
+            }
             <then> {
 				<event-script> {
 					<name> "qfx_interface_speed_on_ifdown.slax";
@@ -43,10 +58,15 @@ var $event-definition = {
 	}
 }
 
+/* variables */
+var $scriptname = "qfx_interface_speed_on_ifdown.slax";
+var $flaptime = 30;         /* last n seconds to check for interface state changes */
+
 
 match / {
 	<event-script-results> {
-		/*
+
+        /*
 			* This copies the entire XML contents of <event-script-input> into the result
 			* tree as a child element of <event-script-results>. This will allow the trigger to dump
 			* events to match on in XML format in the output log. Comment out during normal operation.
@@ -54,8 +74,14 @@ match / {
 		/* copy-of event-script-input; */
 
 
-        /* Interface Regex for parsing */
+        /* Interface Regex for parsing matching xe- interfaces only */
         var $int-regex = "xe-([0-9])/([0-9])/([0-9]+)";
+
+        /* sleep feels a bit dirty but we need to delay the stats collection after first event */
+        /* using a sleep value of 25% less of the defined time to allow interface stats collection */
+        var $delaytime = $flaptime - ($flaptime * 0.25);
+        expr jcs:output("Delaying script execution by ", $delaytime, " seconds");
+        expr jcs:sleep($delaytime);
 
         /* Get a copy of our interface status */
         var $interface-rpc = {
@@ -63,10 +89,21 @@ match / {
         }	
         var $interfaces-results = jcs:invoke( $interface-rpc );
         
+        /* get a copy of our current interface configuration */
+        var $interface-config-rpc = <get-configuration> {
+            <configuration> {
+                <interfaces>;
+            }
+        }
+        var $interface-config = jcs:invoke( $interface-config-rpc );
+
 		/* build a node fragment reporting only the interfaces which flapped in the past X seconds */
         var $flapped := {
-            for-each ($interfaces-results/physical-interface[interface-flapped/@junos:seconds < "60"]) {
+            /* check for interfaces that flapped less than $flaptime, but not 0 */
+            /* always up interfaces like lo0, pfe-0/0/0 and the like are always = 0 so we don't want to match those */
+            for-each ( $interfaces-results/physical-interface[interface-flapped/@junos:seconds < $flaptime]) {
                 
+                expr jcs:output("Found : ", name);
                 /* checks if regex result is not empty ie. if we matched anything */
                 if ( not (jcs:empty( jcs:regex( $int-regex, name) ) )) {
                     var $name = name;
@@ -79,50 +116,57 @@ match / {
                 }
             }
         }
-
+        /* write the match results to the output tree for debug */
         copy-of $flapped;
 
-        /* now we hardcode the port speed on all interfaces that flapped recently */
-        var $config = {
-            <configuration> {
-                <interfaces> {
-                    for-each ( $flapped/interface ) { 
-                        var $intname = name;
-                        <interface> {
-                            <name> $intname;
-                            <speed> "10g";
-                        }
-                    }
 
+        /* check if we have any interfaces to modify and commit the required config */
+        if (not (jcs:empty($flapped))) {
+            /* now we hardcode the port speed on all interfaces that flapped recently */
+            var $config = {
+                <configuration> {
+                    <interfaces> {
+                        for-each ( $flapped/interface ) { 
+                            var $intname = name;
+                            <interface> {
+                                <name> $intname;
+                                <speed> "10g";
+                            }
+                        }
+
+                    }
                 }
             }
-        }
-        copy-of $config;
+            copy-of $config;
 
-        /* open a connection, load and commit the change */
-        var $load-action = "merge";
-        var $options := {
-            <commit-options> {
-                <log> "IFDOWN Script Speed Modification";
+            /* open a connection, load and commit the change */
+            var $load-action = "merge";
+            var $logmessage = "Commit by " _ $scriptname;
+            var $options := {
+                <commit-options> {
+                    <log> $logmessage;
+                }
             }
-        }
-        var $connection = jcs:open();
-        expr jcs:output("connection opened");
+            var $connection = jcs:open();
+            expr jcs:output("connection opened");
 
-        var $results := {
-            call jcs:load-configuration( $action=$load-action, $commit-options=$options, 
-                $configuration = $config, $connection = $connection );
-            copy-of jcs:close( $connection );
-        }
-
-        /* check for errors */
-        if( $results//xnm:error ) {
-            for-each( $results//xnm:error ) {
-                expr jcs:syslog( "external.error", "script error - boo", message );
+            var $results := {
+                call jcs:load-configuration( $action=$load-action, $commit-options=$options, 
+                    $configuration = $config, $connection = $connection );
+                copy-of jcs:close( $connection );
             }
-        }
-        else {
-            expr jcs:syslog( "external.notice", "script success!" );            
+
+            /* check for errors */
+            if( $results//xnm:error ) {
+                for-each( $results//xnm:error ) {
+                    expr jcs:syslog( "external.error", "COMMIT WARNING/ERROR : ", message );
+                }
+            }
+            else {
+                expr jcs:syslog( "external.notice", "COMMIT SUCCESS : Modified interface speed due to link flap" );            
+            }
+        } else {
+            expr jcs:syslog( "external.notice", "SCRIPT ABORT : No Interface Flaps Found in last ", $flaptime, " seconds");
         }
 
 	}
