@@ -2,7 +2,7 @@
     * Author        :   Ryan Barnes
     * Date          :   2017-Dec-5
     * Updated       :
-    * Tested on     :   QFX5200
+    * Tested on     :   QFX5200 17.3R1
     * Description   :
         This script returns detailed LLDP information for all connected neighbors. Typically this would require
         two commands;
