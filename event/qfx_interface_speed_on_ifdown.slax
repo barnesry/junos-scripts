@@ -1,17 +1,3 @@
-/*
-		* Modifies the configured interface speed on SNMP_TRAP_LINK_DOWN to compensate for incorrect autoneg
-
-		* Written: barnesry@
-		* Date      :    6-Apr-2018
-        * Modified  :    11-Apr-2018 
-        * 
-        * Version:  :   1.0 - Initial Draft
-
-        * Log Output to /var/log/<hostname><timestamp><scriptname> on each iteration
-        * 
-        * For additional debug enable "event-options traceoptions flag events"
-
-*/
 version 1.1;
 ns junos = "http://xml.juniper.net/junos/*/junos";
 ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
@@ -19,10 +5,58 @@ ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
 ns my = "http://www.example.com/myfunctions";
 import "../import/junos.xsl";
 
-/* useful for inserting value to test from an op script. */
-/* Modify to reflect an IP of a known host on the platform and run as an Op script */
-/* param $neighbor = "10.0.0.200"; */
+/* 
+    This is free and unencumbered software released into the public domain.
 
+    Anyone is free to copy, modify, publish, use, compile, sell, or
+    distribute this software, either in source code form or as a compiled
+    binary, for any purpose, commercial or non-commercial, and by any
+    means.
+
+    In jurisdictions that recognize copyright laws, the author or authors
+    of this software dedicate any and all copyright interest in the
+    software to the public domain. We make this dedication for the benefit
+    of the public at large and to the detriment of our heirs and
+    successors. We intend this dedication to be an overt act of
+    relinquishment in perpetuity of all present and future rights to this
+    software under copyright law.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+    IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+    OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+    OTHER DEALINGS IN THE SOFTWARE.
+
+    For more information, please refer to <http://unlicense.org>
+
+    ##############################################################
+
+    This script modifies the configured interface speed on SNMP_TRAP_LINK_DOWN to compensate for 
+    incorrect autonegotiation of connected devices forcing the port speed of interfaces matching $regex
+    to "10g".
+
+    Trigger is on 1st event seen within ($flaptime = "30") second event window. The script will execute immediately
+    pausing for $delaytime = 22.5sec ($flaptime - ($flaptime*.25)) to allow sufficient time to collect interface 
+    flap counters before the next event window. 
+
+    Written: barnesry@
+    Date      :    6-Apr-2018
+    Modified  :    11-Apr-2018 
+
+    Version:  :   1.0 - Initial Draft
+
+    Log Output to /var/log/<hostname><timestamp><scriptname> on each iteration. jcs:output() goes here.
+
+    For additional debug check /var/log/escript.log which is the default location for output if traceoptions are not
+    enabled. Anything written to the results tree (ie. <output> ) will show up here.
+
+    Required Configuration : 
+    event-script {
+        file qfx_interface_speed_on_ifdown.slax;
+    }
+*/
 
 /* Embedded event policy */
 /* Will dump script output to local file /var/log/escript.log */
@@ -39,9 +73,9 @@ var $event-definition = {
                 }
             }
             <then> {
-				<event-script> {
-					<name> "qfx_interface_speed_on_ifdown.slax";
-					<output-filename> "qfx_interface_speed_on_ifdown.log";
+                <event-script> {
+                    <name> "qfx_interface_speed_on_ifdown.slax";
+                    <output-filename> "qfx_interface_speed_on_ifdown.log";
 						<destination> {
 							<name> "local";
 						}
@@ -108,10 +142,14 @@ match / {
                 if ( not (jcs:empty( jcs:regex( $int-regex, name) ) )) {
                     var $name = name;
                     var $flap = interface-flapped/@junos:seconds;
+                    var $configspeed = $interface-config/interfaces/interface[name==$name]/speed;
 
+                    /* writes out xml tree for each matching interace and it's associated flap time in seconds */
+                    /* also includes if that same interface is already hard coded in config (blank if not) */
                     <interface> {
                         <name> $name;
                         <flapped> $flap;
+                        <configspeed> $configspeed;
                     }
                 }
             }
@@ -120,53 +158,69 @@ match / {
         copy-of $flapped;
 
 
-        /* check if we have any interfaces to modify and commit the required config */
+        /* did any interfaces flap? */
         if (not (jcs:empty($flapped))) {
-            /* now we hardcode the port speed on all interfaces that flapped recently */
-            var $config = {
-                <configuration> {
-                    <interfaces> {
-                        for-each ( $flapped/interface ) { 
-                            var $intname = name;
-                            <interface> {
-                                <name> $intname;
-                                <speed> "10g";
-                            }
-                        }
+            var $numflapped = count($flapped/interface/name);
 
+            /* of those that flapped, do any NOT have a configured port speed? */
+            if( count($flapped/interface[configspeed == "10g"]/name) < count($flapped/interface/name)) {
+                expr jcs:output("Found at least one interface in ", $numflapped, " with no speed set. Need to commit changes.");
+
+            
+                /* now we hardcode the port speed on *all* interfaces that flapped recently, since we need to commit anyway */
+                var $config = {
+                    <configuration> {
+                        <interfaces> {
+                            for-each ( $flapped/interface ) { 
+                                var $intname = name;
+                                <interface> {
+                                    <name> $intname;
+                                    <speed> "10g";
+                                }
+                            }
+
+                        }
                     }
                 }
-            }
-            copy-of $config;
+                copy-of $config;
 
-            /* open a connection, load and commit the change */
-            var $load-action = "merge";
-            var $logmessage = "Commit by " _ $scriptname;
-            var $options := {
-                <commit-options> {
-                    <log> $logmessage;
+                /* open a connection, load and commit the change */
+                var $load-action = "merge";
+                var $logmessage = "Commit by " _ $scriptname _ " to modify port speed for " _ $numflapped _ " interfaces";
+                var $options := {
+                    <commit-options> {
+                        <log> $logmessage;
+                    }
                 }
-            }
-            var $connection = jcs:open();
-            expr jcs:output("connection opened");
+                var $connection = jcs:open();
+                expr jcs:output("connection opened");
 
-            var $results := {
-                call jcs:load-configuration( $action=$load-action, $commit-options=$options, 
-                    $configuration = $config, $connection = $connection );
-                copy-of jcs:close( $connection );
-            }
-
-            /* check for errors */
-            if( $results//xnm:error ) {
-                for-each( $results//xnm:error ) {
-                    expr jcs:syslog( "external.error", "COMMIT WARNING/ERROR : ", message );
+                var $results := {
+                    call jcs:load-configuration( $action=$load-action, $commit-options=$options, 
+                        $configuration = $config, $connection = $connection );
+                    copy-of jcs:close( $connection );
                 }
-            }
-            else {
-                expr jcs:syslog( "external.notice", "COMMIT SUCCESS : Modified interface speed due to link flap" );            
+
+                /* check for errors */
+                if( $results//xnm:error ) {
+                    for-each( $results//xnm:error ) {
+                        expr jcs:syslog( "external.error", "COMMIT WARNING/ERROR : ", message );
+                    }
+                } else {
+                    var $syslogmessage = "Commit by " _ $scriptname _ " to modify port speed for " _ $numflapped _ " interfaces";
+                    expr jcs:syslog( "external.notice", "COMMIT SUCCESS : ", $syslogmessage );            
+                    expr jcs:output($syslogmessage);
+                }
+            } else {
+                var $message1 = "SCRIPT ABORT : No commit required as " _ $numflapped _ " interfaces already configured";
+                expr jcs:syslog( "external.notice", $message1);
+                expr jcs:output($message1);
             }
         } else {
-            expr jcs:syslog( "external.notice", "SCRIPT ABORT : No Interface Flaps Found in last ", $flaptime, " seconds");
+            var $message2 = "SCRIPT ABORT : No Interface Flaps Found in the last " _ $flaptime _ " seconds";
+            expr jcs:syslog( "external.notice", $message2);
+            expr jcs:output($message2);
+            
         }
 
 	}
