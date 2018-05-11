@@ -1,0 +1,92 @@
+/*
+    Author : Ryan Barnes (barnesry@juniper.net)
+    Date   : 9-May-2018
+*/
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+
+import "../import/junos.xsl";
+
+/* this is imported into JunOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "target_version";
+        <description> "specific version we want to match to trigger a reboot";
+    }
+}
+param $target_version;
+
+param $lockfile = '/var/tmp/reboot_after.lock';
+
+match / {
+    <event-script-results> {
+
+        /* parses 12.1X47-D45.4 out of JUNOS Software Release [12.1X47-D45.4] */
+        var $version_regex = "\\[(.*)\\]";
+
+        /* set up rpc call to check system uptime */
+        var $uptime_rpc = { 
+            <get-system-uptime-information>; 
+        }
+        var $uptime = jcs:invoke( $uptime_rpc );
+        var $current_date = $uptime/current-time/date-time;
+        var $protocols_start = $uptime/protocols-started-time/time-length/@junos:seconds;
+        /* copy-of $uptime; */
+        expr jcs:output("protocols-started : ", $protocols_start, "sec");
+
+        /* set up rpc call to check version */
+        var $version_rpc = {
+            <get-software-information>;
+        }
+        var $version = jcs:invoke( $version_rpc );
+
+        /* copy-of $version; */
+        var $version_short = jcs:regex($version_regex, $version/package-information/comment);
+        /* entire match : debug */
+        /* expr jcs:output("version : ", $version_short[1]); */
+        expr jcs:output("version : ", $version_short[2]);
+
+        /* check if the version we're running is the version we want to trigger a reboot for */
+        if( $version_short[2] == $target_version ) {
+            expr jcs:output($version_short[2], " matches ", $target_version);
+        }
+        else {
+            expr jcs:output($version_short[2], " doesn't match ", $target_version);
+        }
+
+        /* check for lock file which indicates we've already run once */
+        var $fileget = {
+            <file-get> {
+                <filename>$lockfile;
+                <encoding>'ascii';
+            }
+        }
+        var $file_exists = jcs:invoke($fileget);
+        /* This Week : Mastering Junos Automation Page 62 for error match explanation */
+        if ($file_exists//self::xnm:error) {
+            copy-of $file_exists//self::xnm:error;
+            expr jcs:output("Lock file doesn't exist");
+        }
+        
+        /* write lock file */
+        call write_lock_file($lockfile, $current_date);
+    }
+}
+
+template write_lock_file($lockfile, $current_date) {
+    var $fileput = {
+        <file-put> {
+            <filename>$lockfile;
+            <encoding>'ascii';
+            <permission>'0644';
+            <delete-if-exist>;
+            <file-contents>$current_date;
+        }
+    }
+    var $local_file_out = jcs:invoke($fileput);
+    expr jcs:output("Saving lock file : ", $lockfile);
+}
