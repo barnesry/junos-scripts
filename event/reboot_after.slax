@@ -1,6 +1,15 @@
 /*
-    Author : Ryan Barnes (barnesry@juniper.net)
-    Date   : 9-May-2018
+    Author      : Ryan Barnes (barnesry@juniper.net)
+    Date        : 9-May-2018
+
+    Description : This script looks for a recent reboot/uptime within the past $seconds
+                  and if the provided JunOS version matches the version we're running and
+                  a lock file doesn't exist meaning we've already run at least once before,
+                  we'll issue a reboot command to the unit.
+
+                  This is to solve for occasional upgrades where remote connectivity is broken
+                  immediately after the upgrade, and after $variable period of time the device
+                  will auto-reboot.
 */
 
 version 1.0;
@@ -28,35 +37,6 @@ match / {
         /* parses 12.1X47-D45.4 out of JUNOS Software Release [12.1X47-D45.4] */
         var $version_regex = "\\[(.*)\\]";
 
-        /* set up rpc call to check system uptime */
-        var $uptime_rpc = { 
-            <get-system-uptime-information>; 
-        }
-        var $uptime = jcs:invoke( $uptime_rpc );
-        var $current_date = $uptime/current-time/date-time;
-        var $protocols_start = $uptime/protocols-started-time/time-length/@junos:seconds;
-        /* copy-of $uptime; */
-        expr jcs:output("protocols-started : ", $protocols_start, "sec");
-
-        /* set up rpc call to check version */
-        var $version_rpc = {
-            <get-software-information>;
-        }
-        var $version = jcs:invoke( $version_rpc );
-
-        /* copy-of $version; */
-        var $version_short = jcs:regex($version_regex, $version/package-information/comment);
-        /* entire match : debug */
-        /* expr jcs:output("version : ", $version_short[1]); */
-        expr jcs:output("version : ", $version_short[2]);
-
-        /* check if the version we're running is the version we want to trigger a reboot for */
-        if( $version_short[2] == $target_version ) {
-            expr jcs:output($version_short[2], " matches ", $target_version);
-        }
-        else {
-            expr jcs:output($version_short[2], " doesn't match ", $target_version);
-        }
 
         /* check for lock file which indicates we've already run once */
         var $fileget = {
@@ -67,13 +47,45 @@ match / {
         }
         var $file_exists = jcs:invoke($fileget);
         /* This Week : Mastering Junos Automation Page 62 for error match explanation */
+        /* if we don't find a lock file, we'll continue on */
         if ($file_exists//self::xnm:error) {
-            copy-of $file_exists//self::xnm:error;
-            expr jcs:output("Lock file doesn't exist");
+
+            /* set up rpc call to check system uptime */
+            var $uptime_rpc = { 
+                <get-system-uptime-information>; 
+            }
+            var $uptime = jcs:invoke( $uptime_rpc );
+            var $current_date = $uptime/current-time/date-time;
+            var $protocols_start = $uptime/protocols-started-time/time-length/@junos:seconds;
+            /* copy-of $uptime; */
+            expr jcs:output("protocols-started : ", $protocols_start, "sec");
+
+            /* set up rpc call to check version */
+            var $version_rpc = {
+                <get-software-information>;
+            }
+            var $version = jcs:invoke( $version_rpc );
+
+            /* copy-of $version; */
+            var $version_short = jcs:regex($version_regex, $version/package-information/comment);
+            /* entire match : debug */
+            /* expr jcs:output("version : ", $version_short[1]); */
+            expr jcs:output("version : ", $version_short[2]);
+
+            /* check if the version we're running is the version we want to trigger a reboot for */
+            if( $version_short[2] == $target_version ) {
+                expr jcs:output($version_short[2], " matches ", $target_version);
+            }
+            else {
+                expr jcs:output($version_short[2], " doesn't match ", $target_version);
+            } 
+
+            /* write lock file to prevent future execution */
+            call write_lock_file($lockfile, $current_date);            
         }
-        
-        /* write lock file */
-        call write_lock_file($lockfile, $current_date);
+        else {
+            expr jcs:output("Lock file ", $lockfile, " exists meaning we've already run once");
+        }        
     }
 }
 
