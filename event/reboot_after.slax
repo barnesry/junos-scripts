@@ -10,6 +10,8 @@
                   This is to solve for occasional upgrades where remote connectivity is broken
                   immediately after the upgrade, and after $variable period of time the device
                   will auto-reboot.
+    
+    Version     : 0.1 - 9-May-2018
 */
 
 version 1.0;
@@ -32,7 +34,6 @@ param $target_version;
 /* global variables */
 param $lockfile = '/var/tmp/reboot_after.lock';
 param $reboot_limit = 500;
-param $version_match;
 param $script_name = "reboot_after.slax";
 
 match / {
@@ -63,7 +64,6 @@ match / {
             var $protocols_start = $uptime/protocols-started-time/time-length/@junos:seconds;
             /* copy-of $uptime; */
             expr jcs:output("protocols-started : ", $protocols_start, "sec");
-            expr jcs:syslog("external.warn", "protocols-started : ", $protocols_start, "sec");
 
             /* set up rpc call to check version */
             var $version_rpc = {
@@ -73,10 +73,9 @@ match / {
 
             /* copy-of $version; */
             var $version_short = jcs:regex($version_regex, $version/package-information/comment);
-            /* entire match : debug */
+            /* entire regex match : debug */
             /* expr jcs:output("version : ", $version_short[1]); */
             expr jcs:output("version : ", $version_short[2]);
-            expr jcs:syslog("external.warn", "version : ", $version_short[2]);
 
             /* check if the version we're running is the version we want to trigger a reboot for */
             if( $version_short[2] == $target_version ) {
@@ -93,7 +92,7 @@ match / {
                     <output> "Setting lock file " _ $lockfile; 
 
                     /* and....reboot */
-                    /* lock file doesn't exist, rebooted in the last $reboot_limit seconds, and version matches */
+                    /* lock file doesn't exist && rebooted in the last $reboot_limit seconds && and version matches */
                     var $reboot_rpc = { 
                         <request-reboot>; 
                     };
@@ -103,25 +102,26 @@ match / {
                     var $reboot_result = jcs:invoke( $reboot_rpc );
                     if ( $reboot_result//self::xnm:error ) {
                         <output> "Reboot Request Failed!";
+                        copy-of $reboot_result;
                     }
                     
                 }
                 else {
-                    var $uptime_fail_msg = "CHECK FAIL : Device Uptime " _ $protocols_start _ " greater than reboot limit " _ $reboot_limit _ ". EXITING!!!";
-                    /* expr jcs:output($uptime_fail_msg); */
-                    call write_syslog_and_output_tree($message=$uptime_fail_msg);
+                    var $uptime_fail_msg = "CHECK FAIL : Device Uptime " _ $protocols_start _ "sec greater than reboot limit " _ $reboot_limit _ "sec. EXITING!!!";
+                    /* don't really want to write this to syslog or anything for each failure */
+                    <output> $uptime_fail_msg;
                 }
             }
             else {
                 var $version_fail_msg = "CHECK FAIL : " _ $version_short[2] _ " doesn't match " _ $target_version _ ". EXITING!!!";
-                /* expr jcs:output($version_fail_msg); */
-                call write_syslog_and_output_tree($message=$version_fail_msg);
+                /* don't really want to write this to syslog or anything for each failure */
+                <output> $version_fail_msg;
             } 
         }
         else {
             var $exit_msg = "Lock file " _ $lockfile _ " exists meaning we've already run once! EXITING!!!";
-            /* expr jcs:output($exit_msg); */
-            call write_syslog_and_output_tree($message=$exit_msg);
+            /* don't really want to write this to syslog or anything for each failure */
+            <output> $exit_msg;
         }        
     }
 }
