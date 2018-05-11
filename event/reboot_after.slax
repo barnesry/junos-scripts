@@ -29,7 +29,11 @@ var $arguments = {
 }
 param $target_version;
 
+/* global variables */
 param $lockfile = '/var/tmp/reboot_after.lock';
+param $reboot_limit = 500;
+param $version_match;
+param $script_name = "reboot_after.slax";
 
 match / {
     <event-script-results> {
@@ -59,6 +63,7 @@ match / {
             var $protocols_start = $uptime/protocols-started-time/time-length/@junos:seconds;
             /* copy-of $uptime; */
             expr jcs:output("protocols-started : ", $protocols_start, "sec");
+            expr jcs:syslog("external.warn", "protocols-started : ", $protocols_start, "sec");
 
             /* set up rpc call to check version */
             var $version_rpc = {
@@ -71,20 +76,52 @@ match / {
             /* entire match : debug */
             /* expr jcs:output("version : ", $version_short[1]); */
             expr jcs:output("version : ", $version_short[2]);
+            expr jcs:syslog("external.warn", "version : ", $version_short[2]);
 
             /* check if the version we're running is the version we want to trigger a reboot for */
             if( $version_short[2] == $target_version ) {
-                expr jcs:output($version_short[2], " matches ", $target_version);
+                /* expr jcs:output($version_short[2], " matches ", $target_version); */
+                <output> "CHECK PASS : Version : " _ $version_short[2] _ " matches target " _ $target_version;
+
+                /* check if we've rebooted within the last $reboot_limit seconds */
+                if ( $protocols_start < $reboot_limit ) {
+                    /* expr jcs:output("Device rebooted within the last ", $protocols_start, "seconds."); */
+                    <output> "CHECK PASS : device_uptime=" _ $protocols_start _ "sec < " _ $reboot_limit _ "sec";
+
+                    /* write lock file to prevent future execution */
+                    call write_lock_file($lockfile, $current_date);
+                    <output> "Setting lock file " _ $lockfile; 
+
+                    /* and....reboot */
+                    /* lock file doesn't exist, rebooted in the last $reboot_limit seconds, and version matches */
+                    var $reboot_rpc = { 
+                        <request-reboot>; 
+                    };
+                    var $reboot_msg = "ALL CHECKS PASSED : Requesting Reboot...";
+                    call write_syslog_and_output_tree($message=$reboot_msg);
+                    
+                    var $reboot_result = jcs:invoke( $reboot_rpc );
+                    if ( $reboot_result//self::xnm:error ) {
+                        <output> "Reboot Request Failed!";
+                    }
+                    
+                }
+                else {
+                    var $uptime_fail_msg = "CHECK FAIL : Device Uptime " _ $protocols_start _ " greater than reboot limit " _ $reboot_limit _ ". EXITING!!!";
+                    /* expr jcs:output($uptime_fail_msg); */
+                    call write_syslog_and_output_tree($message=$uptime_fail_msg);
+                }
             }
             else {
-                expr jcs:output($version_short[2], " doesn't match ", $target_version);
+                var $version_fail_msg = "CHECK FAIL : " _ $version_short[2] _ " doesn't match " _ $target_version _ ". EXITING!!!";
+                /* expr jcs:output($version_fail_msg); */
+                call write_syslog_and_output_tree($message=$version_fail_msg);
             } 
-
-            /* write lock file to prevent future execution */
-            call write_lock_file($lockfile, $current_date);            
         }
         else {
-            expr jcs:output("Lock file ", $lockfile, " exists meaning we've already run once");
+            var $exit_msg = "Lock file " _ $lockfile _ " exists meaning we've already run once! EXITING!!!";
+            /* expr jcs:output($exit_msg); */
+            call write_syslog_and_output_tree($message=$exit_msg);
         }        
     }
 }
@@ -101,4 +138,13 @@ template write_lock_file($lockfile, $current_date) {
     }
     var $local_file_out = jcs:invoke($fileput);
     expr jcs:output("Saving lock file : ", $lockfile);
+}
+
+template write_syslog($message) {
+    expr jcs:syslog("external.warn", $script_name, $message);
+}
+
+template write_syslog_and_output_tree($message) {
+    call write_syslog($message);
+    <output> $message;
 }
