@@ -10,6 +10,8 @@
                   This is to solve for occasional upgrades where remote connectivity is broken
                   immediately after the upgrade, and after $variable period of time the device
                   will auto-reboot.
+
+                  Tested with srx100-h2 running 12.1X47-D45.4
     
     Version     : 0.1 - 9-May-2018
 */

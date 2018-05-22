@@ -83,13 +83,13 @@ var $event-definition = {
                 }
             }
         }
-		<destinations> {
-			<name> "local";
-			<archive-sites> {
-				<name> "/var/log";
-			}
-		}
-	}
+        <destinations> {
+            <name> "local";
+            <archive-sites> {
+            <name> "/var/log";
+            }
+        }
+    }
 }
 
 /* variables */
@@ -219,8 +219,7 @@ match / {
         } else {
             var $message2 = "SCRIPT ABORT : No Interface Flaps Found in the last " _ $flaptime _ " seconds";
             expr jcs:syslog( "external.notice", $message2);
-            expr jcs:output($message2);
-            
+            expr jcs:output($message2);   
         }
 	}
 }
