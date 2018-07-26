@@ -1,0 +1,106 @@
+/* Author : Ryan Barnes (barnesry@juniper.net)
+ * Date   : 26-July-2018
+ 
+ * Copyright 2017 Juniper Networks, Inc. All rights reserved.
+ * Licensed under the Juniper Networks Script Software License (the "License"). 
+ * You may not use this script file except in compliance with the License, which is located at 
+ * http://www.juniper.net/support/legal/scriptlicense/
+ * Unless required by applicable law or otherwise agreed to in writing by the parties, software 
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+ * OF ANY KIND, either express or implied.
+ 
+  
+ * This script audits the output of existing 'get-services-security-associations-information' for IPSec
+ * retrieving the associated information from each session.
+ *
+ *   RuleName             TunnelIndex   InsideInterface fpc/pic
+ *   VPN-HE-TUNNEL-1001-a     1         ms-1/0/0.1001   fpc:1 pic:0
+ *   VPN-HE-TUNNEL-1001-b     2         ms-1/0/0.9001   fpc:1 pic:0
+ *   VPN-HE-TUNNEL-1002-a     3         ms-1/1/0.1002   fpc:1 pic:1
+ *   VPN-HE-TUNNEL-1002-b     4         ms-1/1/0.9002   fpc:1 pic:1
+ *   VPN-HE-TUNNEL-1003-a     5         ms-1/2/0.1003   fpc:1 pic:2
+ * 
+ * We then iterate through each session, logging into the services PIC and retrieving the detailed information
+ * installed in the PIC.
+ *
+ *   vty -s mspmand -S -c "plugin ipsec show sadb 2" fpc1.pic0
+ *   sa_handle: 0x1000002, spd_handle: 0x1000002, Triggers: 0 Pic Index 0
+ *   FLAGS 0x20010
+ *   Clear DF: off,  Set DF: off,  Copy DF: off
+ *   Anti-Replay: off ,  Backup-GW: no,  Tunnel Type: Static
+ *   DPD : on,  NATT : off, Invalid-SPI : off
+ *   Tunnel TTL : 0
+ *   Tunnel TOS - Copy from Inner IP hdr
+ *   Tunnel-mtu: 0, Replay win-size: 0 bits, inside subunit: 9001
+ *
+ *   local gw 10.213.6.56, remote gw 10.101.0.1
+ *   src addr 0.0.0.0, src mask 0.0.0.0
+ *   dst addr 0.0.0.0, dst mask 0.0.0.0
+ *
+ *   Preferred Bundle Index: 0
+ *   DPD run down counter: 0
+ *   IKE State: 0
+
+
+ * USAGE : op mx_get_sadb_state
+ *
+*/
+
+version 1.1;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ns str = "http://exslt.org/strings";
+/* You need include this ns to use set:distinct() */
+ns set = "http://exslt.org/sets";
+/* unique namespace used for PID checks function */
+ns jutils = "http://jutils/";
+
+import "../import/junos.xsl";
+
+
+
+/* keep an open a control connection for duration of this script  */
+/* GLOBAL Scope */
+var $connection = jcs:open();
+
+match / {
+
+    <op-script-results> {
+
+        /* get SA info from control plane */
+        var $sa-info-rpc = <get-services-security-associations-information>;
+        var $sa-info = jcs:execute($connection, $sa-info-rpc);
+        
+
+        <output> "RuleName             TunnelIndex   InsideInterface";    
+        for-each ( $sa-info//sa-tunnel-information) {
+            var $fpc_regex = "ms-([0-9])/([0-9])/[0-9].*";
+            var $regex-result = jcs:regex($fpc_regex, sa-inside-interface);
+            var $fpc = $regex-result[2];
+            var $pic = $regex-result[3];
+            var $tunnel-index = sa-tunnel-index;
+
+            <output> sa-rule-name _ "     " _ sa-tunnel-index _ "     " _ sa-inside-interface _ "   fpc:" _ $fpc _ " pic:" _ $pic;
+
+            call get_sadb_detail($connection, $fpc, $pic, $tunnel-index);    
+        }
+        expr jcs:close($connection);
+    }
+}
+
+
+template get_sadb_detail($connection, $fpc, $pic, $tunnel-index) {
+    var $command = 'vty -s mspmand -S -c "plugin ipsec show sadb ' _ $tunnel-index _ '" fpc' _ $fpc _ ".pic" _ $pic;
+    var $rpc = {
+        <request-shell-execute> {
+            <command> $command;
+        }
+    }
+    var $result = jcs:execute($connection,$rpc);
+    <output> $command;
+    expr jcs:output($command);
+    copy-of $result;
+    expr jcs:output($result);
+}
