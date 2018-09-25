@@ -1,0 +1,165 @@
+/*
+ * Example yang for generating OC equivalent of internal meta tree
+   save as "xmlproxyd_krtState.yang" on router.
+   cli : show krt state
+ */
+ 
+module krtState {
+  yang-version 1;
+ 
+  namespace "http://juniper.net/yang/software";
+ 
+  prefix "krt";
+ 
+  import drend {
+    prefix dr;
+  }
+ 
+  grouping krt-state-information-grouping {
+ 
+    list krt-queue-state {
+      key "operations-queued";
+      dr:source "krt-queue-state";
+      leaf operations-queued {
+        type uint32;
+        dr:source krtq-operations-queued;
+      }
+      leaf rt-table-adds {
+        dr:source krtq-rt-table-adds;
+        type uint32;
+      }    
+      leaf interface-routes {
+        dr:source krtq-interface-routes;
+        type uint32;
+      }
+      leaf high-multicast-adds-changes {
+        dr:source krtq-high-multicast-adds-changes;
+        type uint32;
+      }
+      leaf top-indirect-adds-changes {
+        dr:source krtq-top-indirect-adds-changes;
+        type uint32;
+      } 
+      leaf indirect-adds-changes {
+        dr:source krtq-indirect-adds-changes;
+        type uint32;
+      } 
+      leaf indirect-deletes {
+        dr:source krtq-indirect-deletes;
+        type uint32;
+      } 
+      leaf high-mpls-adds {
+        dr:source krtq-high-mpls-adds;
+        type uint32;
+      } 
+      leaf high-mpls-changes {
+        dr:source krtq-high-mpls-changes;
+        type uint32;
+      }  
+      leaf top-priority-adds {
+        dr:source krtq-top-priority-adds;
+        type uint32;
+      }  
+      leaf top-priority-changes {
+        dr:source krtq-top-priority-changes;
+        type uint32;
+      }  
+      leaf top-priority-deletes {
+        dr:source krtq-top-priority-deletes;
+        type uint32;
+      }  
+      leaf high-priority-adds {
+        dr:source krtq-high-priority-adds;
+        type uint32;
+      }  
+      leaf high-priority-changes {
+        dr:source krtq-high-priority-changes;
+        type uint32;
+      }  
+      leaf high-priority-deletes {
+        dr:source krtq-high-priority-deletes;
+        type uint32;
+      }  
+      leaf normal-priority-indirects {
+        dr:source krtq-normal-priority-indirects;
+        type uint32;
+      }  
+      leaf normal-priority-adds {
+        dr:source krtq-normal-priority-adds;
+        type uint32;
+      }  
+      leaf normal-priority-changes {
+        dr:source krtq-normal-priority-changes;
+        type uint32;
+      }  
+      leaf normal-priority-deletes {
+        dr:source krtq-normal-priority-deletes;
+        type uint32;
+      }  
+      leaf least-priority-adds {
+        dr:source krtq-least-priority-adds;
+        type uint32;
+      }  
+      leaf least-priority-changes {
+        dr:source krtq-least-priority-changes;
+        type uint32;
+      }  
+      leaf least-priority-deletes {
+        dr:source krtq-least-priority-deletes;
+        type uint32;
+      } 
+       leaf normal-priority-cnh-deletes {
+        dr:source krtq-normal-priority-cnh-deletes;
+        type uint32;
+      } 
+      leaf normal-priority-gmp {
+        dr:source krtq-normal-priority-gmp;
+        type uint32;
+      } 
+      leaf rt-table-deletes {
+        dr:source krtq-rt-table-deletes;
+        type uint32;
+      } 
+      leaf operations-deferred {
+        dr:source krtq-operations-deferred;
+        type uint32;
+      } 
+      leaf operations-canceled {
+        dr:source krtq-operations-canceled;
+        type uint32;
+      } 
+      leaf async-count {
+        dr:source krtq-async-count;
+        type uint32;
+      } 
+      leaf async-non-q-count {
+        dr:source krtq-async-non-q-count;
+        type uint32;
+      } 
+      leaf time-until-next-run {
+        dr:source krtq-time-until-next-run;
+        type uint32;
+      } 
+       leaf kernel-rt-learnt {
+        dr:source krtq-kernel-rt-learnt;
+        type uint32;
+      } 
+    }
+  }
+ 
+  dr:command-app "xmlproxyd";
+  rpc juniper-netconf-get {
+    dr:command-top-of-output "/junos";
+    dr:command-full-name "drend juniper-netconf-get";
+    dr:cli-command "show krt state";
+    dr:command-help "default <get> rpc";
+    output {
+      container junos {
+      container krt-state-information {
+        dr:source "/krt-state-information";
+        uses krt-state-information-grouping;
+      }
+    }
+   }
+  }
+}

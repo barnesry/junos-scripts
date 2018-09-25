@@ -1,0 +1,52 @@
+tl;dr if you follow the installation of OpenConfig and Network Agent package which you’d already have installed if you’re testing telemetry, 
+you can follow the steps here to install and activate your custom yang files.
+ 
+https://www.juniper.net/documentation/en_US/junos/topics/task/installation/network-agent-installing.html
+https://www.juniper.net/documentation/en_US/junos/topics/task/configuration/sensor-junos-telemetry-interface-configuring.html
+ 
+user@gateway1> show cli history
+  16:57:05 -- request system yang add package krt_state proxy-xml module /var/tmp/xmlproxyd_krtState.yang
+  17:03:25 -- show ephemeral-configuration
+  17:03:30 -- show log na-grpcd
+  17:03:38 -- show log na-grpcd | last 100
+  17:03:51 -- show ephemeral-configuration
+  17:04:29 -- show system yang package
+  17:05:16 -- show ephemeral-configuration
+  17:05:23 -- show log na-grpcd | last 100
+ 
+Then you can then test/monitor using an open source jtimon tool to subscribe to the new sensor, which will collect KRT info and return to the subscribing client at the subscribed interval.
+ 
+# jtimon config file used to subscribe and collect the KRT state
+mbp:sample-config $ cat krt_state.json
+{
+    "host": "gateway1",
+    "port": 50051,
+    "user": "lab",
+    "password": "lab123",
+    "cid": "barnesry",
+    "grpc" : {
+        "ws" : 524288
+    },
+    "paths": [{
+        "path": "/junos/krt-state-information",
+        "freq": 10000
+        }]
+}
+ 
+# confirming our subscription is working
+mbp:sample-config $ ~/go/bin/jtimon --config krt_state.json --print | egrep -A 1 kernel-rt-learnt
+2018/06/11 14:09:13 logging in  for gateway1:50051 [periodic stats every 10 seconds]
+  key: kernel-rt-learnt
+  uint_value: 34
+--
+  key: kernel-rt-learnt
+  uint_value: 34
+--
+  key: kernel-rt-learnt
+  uint_value: 34
+--
+  key: kernel-rt-learnt
+  uint_value: 34
+--
+  key: kernel-rt-learnt
+  uint_value: 34
