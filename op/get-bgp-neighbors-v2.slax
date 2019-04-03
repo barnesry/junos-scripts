@@ -7,6 +7,8 @@
  *  ===============
  *  v0.1    Initial Release (barnesry@)
  *          Supports IPv4 inet.0 RIB values, sorting of columns
+ *  v0.2    Updated to support reporting of peer-group available in 17.4 output
+            rather than having to pull from config directly
  *
  * barnesry@vSRX-1> op get-bgp-neighbors
  * Peer            ASN   Group                Description               Flaps Rcvd/Acpt/Adv         Last Up/Down State
@@ -58,18 +60,6 @@ match / {
     /* Send JUNOS XML API Element via jcs:invoke */
     var $results2 = jcs:invoke("get-bgp-summary-information");
 
-    /* Send JUNOS XML API Element via jcs:invoke */
-    var $reqconf = <get-configuration database="commited" inherit="inherit" format="xml"> {
-                      <configuration> {
-                        <protocols> {
-                          <bgp>;
-                        }
-                        routing-
-                      }
-                    }
-    var $bgpconf = jcs:invoke($reqconf);
-
-
 
     /* Parse our peerIP+port into an IP only (need to confirm ipv6 matching as well) */
     /* var $peer-regex = "^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)";  V4 only... */
@@ -111,7 +101,7 @@ match / {
         <bgp-peer> {
           <peer-address> $peer-ip;
           <description> description;
-          <group> $bgpconf/protocols/bgp/group[not(@inactive) and neighbor[not(@inactive)]/name=$peer-ip]/name;
+          <peer-group> peer-group;
           <peer-as> peer-as;
           <received-routes> $received-routes;
           <accepted-routes> $accepted-routes;
@@ -128,7 +118,7 @@ match / {
     }
 
     /* Print our Headers */
-    <output> jcs:printf("%-15s %-5s %-20.20s %-25s %-5s %-21s %-12s %-15s","Peer","ASN","Group","Description","Flaps","Rcvd/Acpt/Adv","Last Up/Down","State" );
+    <output> jcs:printf("%-15s %-5s %-20.20s %-25s %-5s %-21s %-12s %-15s","Peer","ASN","Peer-Group","Description","Flaps","Rcvd/Acpt/Adv","Last Up/Down","State" );
 
     /* Check if we wanted to sort the table before we print it out */
     if( not ( jcs:empty ( $sortby ) ) ) {
@@ -136,33 +126,33 @@ match / {
       if ( $sortby == 'flaps' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="flap-count" order="descending" data-type="number">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'state' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="peer-state" order="ascending">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'description' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="description" order="ascending">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'updown' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="elapsed-time-seconds" order="descending" data-type="number">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'group' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="group" order="ascending">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       }
     }
     else {
       for-each ( $peer-table/bgp-peer ) {
-        <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+        <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
       }
     }
 
