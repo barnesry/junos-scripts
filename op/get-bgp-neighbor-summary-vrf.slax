@@ -1,0 +1,89 @@
+/*
+ *  get_bgp_neighbor-summary-vrf.slax
+ *
+ *  Created by Ryan Barnes (barnesry@juniper.net) on 03-March-2019.
+ *
+ *  Version History
+ *  ===============
+ *  v0.1    Initial Release (barnesry@)
+ *      
+ *  USAGE:
+ *  barnesry@lab-router> op get-bgp-neighbor-summary-vrf format txt
+ *  PEER-ADDRESS              BGP-RIB                     PEER-STATE
+ *  10.254.1.254             VRF1.inet.0                  Established
+ *  10.254.2.254             VRF2.inet.0                  Established
+ *  10.254.3.254             VRF3.inet.0                  Established
+ *  10.254.4.254             VRF4.inet.0                  Established
+ *  {...SNIP...}
+ *
+
+ *   barnesry@lab-router> op get-bgp-neighbor-summary-vrf format xml | display xml
+ *  <rpc-reply xmlns:junos="http://xml.juniper.net/junos/17.4R1/junos">
+ *      <bgp-peer>
+ *          <peer-address>
+ *              10.254.1.254
+ *          </peer-address>
+ *          <bgp-rib>
+ *              VRF1.inet.0
+ *          </bgp-rib>
+ *          <peer-state>
+ *              Established
+ *          </peer-state>
+ *      </bgp-peer>
+ *      {...SNIP...}
+ */
+
+version 1.0;
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+
+import "../import/junos.xsl";
+
+/* This is imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "format";
+        <description> "Output format [txt|xml] (optional)";
+    }
+}
+param $format;
+
+
+match / {
+  <op-script-results> {
+
+    /* Send JUNOS XML API Element via jcs:invoke */
+    var $results2 = jcs:invoke("get-bgp-summary-information");
+
+    var $peer-table := {
+      for-each ( $results2/bgp-peer ) {
+
+        <bgp-peer> {
+          <peer-address> peer-address;
+          <bgp-rib> bgp-rib/name;
+	        <peer-state> peer-state;
+        }
+      }
+    }
+    
+    /* if we received our optional output param */
+    if( not ( jcs:empty ( $format ) ) ) {
+      if ($format == 'xml') {
+        copy-of $peer-table;
+      } 
+      else if ($format == 'txt') {
+        /* HEADERS */
+        <output> jcs:printf("%-25s %-40s %-15s","PEER-ADDRESS","BGP-RIB","PEER-STATE");
+        for-each ( $peer-table/bgp-peer ) {
+          <output> jcs:printf("%-25s %-40s %-15s",peer-address,bgp-rib,peer-state);
+        }
+      }
+    }
+    /* default dump to xml */
+    else {
+      copy-of $peer-table;
+    }
+  }
+}
