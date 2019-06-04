@@ -22,7 +22,7 @@ from lxml import etree
 from jnpr.junos import Device
 from jnpr.junos.utils.config import Config
 from jnpr.junos.exception import ConnectAuthError, LockError, ConfigLoadError, UnlockError, \
-                                    CommitError, RpcError
+                                    CommitError, RpcError, ConnectTimeoutError
 
 debug = False
 commit_confirm_time = 1
@@ -98,15 +98,15 @@ def main():
     parser.add_argument('--target', required=True, dest='target', help='Target host(s) to connect to based on regex')
     parser.add_argument('--user', required=True, dest='user', help='username to connect with')
     parser.add_argument('--password', required=True, dest='password', help='password for target host')
-    parser.add_argument('--show_command', required=False, dest='show_command', help='command to execute on host')
+    parser.add_argument('--command', required=False, dest='command', help='command to execute on host')
     parser.add_argument('--config', required=False, dest='config', help='configlet to push to host')
     parser
     args = parser.parse_args()
     target = args.target
     user = args.user
     password = args.password
-    if args.show_command:
-        command = args.show_command
+    if args.command:
+        command = args.command
     else:
         command = ''
     if args.config:
@@ -120,7 +120,7 @@ def main():
         if re.match(target, hostname):
             
             try:
-                dev = Device(host=hostname, user=user, password=password, timeout=10)
+                dev = Device(host=hostname, user=user, password=password, timeout=30)
                 logging.warning("Connecting : {}".format(dev.hostname))
                 dev.open()
 
@@ -129,14 +129,15 @@ def main():
                     # we want to run a show command
                     result = dev.rpc.cli(command)
                     
-                    get_output = etree.XPath("//text()")
+                    get_output = etree.XPath("//output/text()")
                     # extract text from root <output> node
                     output = get_output(result)[0]
+                    
                     print(f'{hostname} : {output}')
                     
                 elif configfile:
                     # we want to push some config
-                    config = read_config_file(configfile)
+                    config = read_config_file(configfile)[0]
                     
                     cu = Config(dev)
                     try: 
@@ -219,6 +220,9 @@ def main():
                 dev = Device(host=target, user=user, password=password)
                 logging.warning("Connecting to {}".format(dev.hostname))
                 dev.open()
+            except ConnectTimeoutError as err:
+                logging.error("FAIL to connect to {} : {}".format(dev.hostname, err))
+                continue
 
 
 if __name__ == "__main__":
