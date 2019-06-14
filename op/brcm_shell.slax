@@ -1,0 +1,357 @@
+/*  Author : Ryan Barnes (barnesry@juniper.net)
+    Date   : 15-June-2019
+
+    Copyright 2017 Juniper Networks, Inc. All rights reserved.
+    Licensed under the Juniper Networks Script Software License (the "License"). 
+    You may not use this script file except in compliance with the License, which is located at 
+    http://www.juniper.net/support/legal/scriptlicense/
+    Unless required by applicable law or otherwise agreed to in writing by the parties, software 
+    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+    OF ANY KIND, either express or implied.
+
+    Op script to return Broadcom specific ecmp-group and l3host table related commands to track;
+        *) l3host table usage
+        *) lpm table usage
+        *) ecmp-group usage
+        *) ecmp-member usage
+
+    Usage : op brcm-shell [lpm|host|ecmpmembersize|ecmpgroupsize]]
+*/
+
+version 1.1;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ns str = "http://exslt.org/strings";
+/* You need include this ns to use set:distinct() */
+ns set = "http://exslt.org/sets";
+/* unique namespace used for PID checks function */
+ns jutils = "http://jutils/";
+
+
+import "../import/junos.xsl";
+
+
+/* open a control connection as we assume we'll be updating some MIBs during this script run */
+/* GLOBAL Scope */
+var $connection = jcs:open();
+
+/* Command Lookup */
+var $target = "fpc0";
+var $brcm_table_lpm = "set dcbc bcm \"l3 defip show\"";
+var $brcm_table_host = "set dcbc bcm \"l3 l3table show\"";
+var $brcm_table_ecmp_group_size = "set dcbc bcm \"list l3_ecmp_group\"";
+var $brcm_table_ecmp_member_size = "set dcbc bcm \"list l3_ecmp\"";
+var $brcm_table_ecmp_members = "set dcbc bcm \"dump chg L3_ECMP\"";
+var $brcm_table_ecmp_groups = "set dcbc bcm \"dump chg L3_ECMP_GROUP\"";
+
+var $oidmax = "Max";
+var $oidused = "Used";
+var $oidfree = "Free";
+var $oidpercentfree = "PercentFree";
+
+/* Parameters to be imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "command";
+        <description> "BRCM command to execute [lpm|host|ecmpmembers|ecmpgroups|pferoutesummary]";
+    }
+}
+param $command;
+
+
+match / {
+
+    <op-script-results> {
+
+        /* clears the entire jnxUtil table */
+        /* call clear_all_util_mib(); */
+
+        if ( $command == 'lpm' ) {
+            /* build RPC based on input params */
+            var $rpc = {
+                <request-pfe-execute> {
+                    <target>$target;
+                    <command>$brcm_table_lpm;
+                }
+            }
+            /* get our return values */
+            var $result = jutils:execute($rpc); 
+            copy-of $result;  
+        }
+        if ( $command == 'host' ) {
+            /* build RPC based on input params */
+            var $rpc = {
+                <request-pfe-execute> {
+                    <target>$target;
+                    <command>$brcm_table_host;
+                }
+            }
+            /* get our return values */
+            var $result = jutils:execute($rpc); 
+            copy-of $result;             
+        }
+        if ( $command == 'ecmpmembers' ) {
+            var $oidprefix = "brcmTableEcmpMemberCount";
+
+            /* build RPC based on input params */
+            var $rpc = {
+                <request-pfe-execute> {
+                    <target>$target;
+                    <command>$brcm_table_ecmp_members;
+                }
+            }
+            /* get our return values */
+            var $result = jutils:execute($rpc); 
+            /* copy-of $result; */
+
+            var $pattern = "(L3_ECMP\.ipipe.*)";
+            var $lines = jcs:break-lines($result);
+            
+            var $rtf := {
+                for-each ($lines) {
+                    if ( not ( jcs:empty ( jcs:regex($pattern, .)))) {
+                        <ecmp-member> .;
+                    }
+                }
+            }
+            var $num_ecmp_members = count($rtf/ecmp-member);
+            <output> "ECMP MEMBERS IN USE : " _ $num_ecmp_members;
+            
+            for-each ($rtf/ecmp-member) {
+                <output> .;
+            }
+            copy-of $rtf;
+
+            /* write to the SNMP utility MIB */
+            call snmp_set($name=$oidprefix, $value=$num_ecmp_members);
+        }
+        
+        if ( $command == 'ecmpgroups' ) {
+            var $oidprefix = "brcmTableEcmpGroupCount";
+
+            /* build RPC based on input params */
+            var $rpc = {
+                <request-pfe-execute> {
+                    <target>$target;
+                    <command>$brcm_table_ecmp_groups;
+                }
+            }
+            /* get our return values */
+            var $result = jutils:execute($rpc); 
+            /* copy-of $result; */
+
+            var $pattern = "(L3_ECMP_GROUP\.ipipe.*)";
+            var $lines = jcs:break-lines($result);
+            
+            var $rtf := {
+                for-each ($lines) {
+                    if ( not ( jcs:empty ( jcs:regex($pattern, .)))) {
+                        <ecmp-group> .;
+                    }
+                }
+            }
+            var $num_ecmp_groups = count($rtf/ecmp-group);
+            <output> "ECMP GROUPS IN USE : " _ $num_ecmp_groups;
+            
+            for-each ($rtf/ecmp-group) {
+                <output> .;
+            }
+            copy-of $rtf;
+
+            /* write to the SNMP utility MIB */
+            call snmp_set($name=$oidprefix, $value=$num_ecmp_groups);
+        }
+        
+        if ( $command == 'pferoutesummary' ) {
+            var $oidprefix = "brcmTablePfe";
+            call clear_related_mib($oidprefix=$oidprefix);
+
+            /* build RPC based on input params */
+            var $rpc = <command> "show pfe route summary hw";
+    
+            /* get our return values */
+            var $result = jutils:execute($rpc); 
+            copy-of $result;
+            var $lines = jcs:break-lines($result);
+
+            /* looking for specific interesting lines */
+            /* Type            Max       Used      Free      % free */
+            /* ---------------------------------------------------- */
+            /* IPv4 Host       8192      85        8099      98.86  */
+            var $pattern = "^(IPv4) ([a-zA-Z]+) +([0-9]+) +([0-9]+) +([0-9]+) +([0-9]+\.[0-9]+)";
+
+            /* build an RTF to XML-ize the BRCM output so we can write to MIB */
+            var $rtf := {
+                for-each ($lines) {
+                    var $line = .;
+                    /* if we found a match */
+                    if ( not ( jcs:empty ( jcs:regex($pattern, $line)))) {
+
+                        <table> {    
+                            var $regex-result = jcs:regex($pattern, $line);
+                            /* <output> $regex-result[1]; */
+
+                            var $table = $regex-result[2] _ $regex-result[3];
+                            var $max = $regex-result[4];
+                            var $maxheader = $table _ "Max";
+                        
+                            var $used = $regex-result[5];
+                            var $usedheader = $table _ "Used";
+                        
+                            var $free = $regex-result[6];
+                            var $freeheader = $table _ "Free";
+
+                            var $percentfree = $regex-result[7];
+                            var $percentfreeheader = $table _ "PercentFree";
+
+                            <tablename> $table;
+                            <max> $max;
+                            <used> $used;
+                            <free> $free;
+                            <percentfree> $percentfree;
+                        }
+                    }
+                }   
+            }
+            /* Send a copy of PFE Table Usage to the Utility MIB */
+            for-each( $rtf/table ) {
+                var $oidnamemax = $oidprefix _ tablename _ $oidmax;
+                call snmp_set($name=$oidnamemax, $value=max);
+
+                var $oidnameused = $oidprefix _ tablename _ $oidused;
+                call snmp_set($name=$oidnameused, $value=used);
+
+                var $oidnamefree = $oidprefix _ tablename _ $oidfree;
+                call snmp_set($name=$oidnamefree, $value=free);
+
+                var $oidnamepercentfree = $oidprefix _ tablename _ $oidpercentfree;
+                call snmp_set($name=$oidnamepercentfree, $value=percentfree);
+            }
+        }          
+    }
+}
+
+/* build full RPC XML command to pass into template */
+function jutils:execute($rpc) {
+    if( not( $connection )) {
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ":ERROR: unable to connect to Junos API");
+        terminate;
+    }
+    
+    call check_pid;
+
+    var $results = jcs:execute($connection, $rpc);
+    
+
+    /* if response is empty then exit and terminate */
+    if (jcs:empty($results)) {
+            <xsl:message terminate="yes"> "Failure to retrieve $rpc";
+    }
+
+    result $results;
+}
+
+
+template check_pid {
+    var $running_pid = jutils:running( $connection, $script );
+    if ( $running_pid ) {
+        <xsl:message terminate="yes"> "terminate script because another instance with pid " _ $running_pid _ " is still running";
+    }
+}
+
+template snmp_set($name, $value, $type = "string" ) {
+
+    var $set_rpc = <request-snmp-utility-mib-set> {
+        <object-type> $type;
+        <object-value> $value;
+        <instance> $name;
+    }
+    var $out = jcs:execute($connection, $set_rpc);
+    if ($out//xnm:error) {
+        <xsl:message terminate="yes"> "Error setting Utility MIB instance: " _ $results/..//xnm:error/message;
+    }    
+}
+
+template clear_related_mib($oidprefix) {
+    /* need to break down the prefix into component characters so we can clear it on the CLI */
+    /* Format Required : show snmp mib walk jnxUtilStringValue."b"."r"."c"."m"."T"."a"."b"."l"."e" */
+    var $characters = str:tokenize($oidprefix, "");
+    <output> $characters;
+
+    var $rpc-walk-mib = <rpc> {
+        /* jnxUtilStringValue.$prefix: */
+        /* request snmp utility-mib clear all object-type string instance with a given $prefix */
+        var $command = "show snmp mib walk jnxUtilStringValue." _ $oidprefix _ " ascii";
+        <command> $command;
+    }
+    var $util-mib-set = jcs:execute($connection,$rpc-walk-mib);
+    for-each ($util-mib-set//snmp-object) {
+        call clear_util_mib($name=./index/index-value);
+    }
+}
+ 
+template clear_util_mib($name) {
+    var $clear-rpc = <request-snmp-utility-mib-clear> {
+        <object-type> "string";
+        <instance> $name;
+    }
+    var $out = jcs:execute($connection,$clear-rpc);
+}
+
+template clear_all_util_mib() {
+    var $rpc-walk-mib = <rpc> {
+        /* Wipe Entire jnxUtil */
+        /* request snmp utility-mib clear object-type string */
+        <command> "show snmp mib walk jnxUtil ascii";
+    }
+    var $util-mib-set = jcs:execute($connection,$rpc-walk-mib);
+    for-each ($util-mib-set//snmp-object) {
+        call clear_util_mib($name=./index/index-value);
+    }    
+}
+
+function jutils:file-exists( $filename ) {
+  var $ls_file = <file-list> { <path> $filename; }
+  var $ls_got = jcs:execute( $connection, $ls_file );
+  var $retval = boolean( $ls_got//file-information );
+  
+  result $retval;
+}
+
+function jutils:running( $connection, $script ) {
+    /* function to check if another instance of this script is still running
+     *
+       :param connection: connection handle
+       :param script: name used to identify the script
+       :return: pid of running instance or false
+     */
+    mvar $running = false();
+ 
+    var $pid = <pid> $junos-context/pid;
+    var $pid_filename = "/mfs/var/tmp/" _ $script _ ".pid";
+    
+    /* pid_file won't exist on first run */
+    var $pid_file = document( $pid_filename );
+    
+    if ( not( jcs:empty( $pid_file//pid ) ) ) {
+        var $processes_rpc = { <command> "show system processes extensive"; }
+        var $processes := jcs:execute( $connection, $processes_rpc );
+        var $processes_lines = jcs:break-lines( $processes );
+ 
+        for-each( $processes_lines ) {
+            if ( jcs:regex( "^[[:blank:][:space:]]*" _ $pid_file//pid _ "[[:blank:][:space:]]+.*cscript.*", . )[1] ) {
+                set $running = true();
+            }
+        }
+    }
+    if ( $running ) {
+        result $pid_file//pid;
+    } else {
+        <xsl:document method="xml" href=$pid_filename append="no"> {
+            copy-of $pid;
+        }
+        result false();
+    }
+}
