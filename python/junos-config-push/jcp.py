@@ -1,6 +1,9 @@
 #!/usr/env/python3
 
-''' This script uses the local /etc/hosts file on MacOS to execute RPC calls based on wildcard
+''' Author  : Ryan Barnes (barnesry@juniper.net)
+    Date    : 10-June-2019
+    
+    This script uses the local /etc/hosts file on MacOS to execute RPC calls based on wildcard
     inputs
     
     # example targets labrouter-r1 and labrouter-r2 to return arbitary command
@@ -73,6 +76,19 @@ def read_config_file(filename):
     except FileNotFoundError:
         print("Can't open ConfigFile : {}".format(filename))
 
+def read_diff_file(filename):
+    '''Opens, reads and returns the corresponding .diff for the supplied configuration file'''
+    try:
+        if debug:
+            logging.info("Opening {}".format(filename))
+
+        with open(filename, 'r') as f:
+            diffile = f.read()
+            return diffile
+    
+    except FileNotFoundError:
+        print("Can't open DiffFile : {}".format(filename))
+
 def should_we_continue():
     response = input("Proceed? [y/N] : ")
     if response == "\n":
@@ -99,7 +115,8 @@ def main():
     parser.add_argument('--user', required=True, dest='user', help='username to connect with')
     parser.add_argument('--password', required=True, dest='password', help='password for target host')
     parser.add_argument('--command', required=False, dest='command', help='command to execute on host')
-    parser.add_argument('--config', required=False, dest='config', help='configlet to push to host')
+    parser.add_argument('--config_file', required=False, dest='config_file', help='configlet to push to host')
+    parser.add_argument('--diff_file', required=False, dest='diff_file', help='diff file to compare for auto-proceed')
     parser
     args = parser.parse_args()
     target = args.target
@@ -109,11 +126,18 @@ def main():
         command = args.command
     else:
         command = ''
-    if args.config:
-        configfile = args.config
+    if args.config_file:
+        configfile = args.config_file
     else:
         configfile = ''
 
+    if args.diff_file:
+        diff_filename = args.diff_file
+    else:
+        diff_filename = False
+    
+
+    proceed = False
 
     for hostname in read_hosts():
         # for anything matching our regex provided at the cli
@@ -137,7 +161,7 @@ def main():
                     
                 elif configfile:
                     # we want to push some config
-                    config = read_config_file(configfile)[0]
+                    config = read_config_file(configfile)
                     
                     cu = Config(dev)
                     try: 
@@ -158,10 +182,36 @@ def main():
                     # show the diff
                     print(f'{dev.hostname} : DIFF')
                     print(f'{"#"*20}')
-                    cu.pdiff()
-                    
+                    diff = cu.diff()
+                    if diff is not None:
+                        diff = diff.strip()
+                        print(diff)
+                    else:
+                        print("No DIFF")
+
+                    # if we supplied a file to compare
+                    if diff_filename:
+                        print(f'{"#"*20}')
+                        print("DIFF CHECK")
+                        print(f'{"#"*20}')
+                        expected_diff = read_diff_file(diff_filename)
+
+                        if diff == expected_diff:
+                            proceed = True
+                            print("MATCH!! Proceeding with Commit.")
+                        else:
+                            diffmatch = False
+                            print("FAIL!! Expected...")
+                            print(expected_diff)
+                            print("Are you sure you want to ", end = '')
+                            proceed = should_we_continue()
+                    else:
+                        # we should ask for permission to continue if no diffile is suppplied
+                        proceed = should_we_continue()
+                        
+
                     # wait for user to confirm it's OK to proceed after viewing diff
-                    if should_we_continue() is False:
+                    if proceed is False:
                         logging.warning("Attempting rollback...")
                         rollback_result = cu.rollback()
                         if rollback_result:
