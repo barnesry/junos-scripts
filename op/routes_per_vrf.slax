@@ -1,0 +1,172 @@
+/* Author : Ryan Barnes (barnesry@juniper.net)
+ * Date   : 15-March-2019
+ *
+ * Copyright 2017 Juniper Networks, Inc. All rights reserved.
+ * Licensed under the Juniper Networks Script Software License (the "License"). 
+ * You may not use this script file except in compliance with the License, which is located at 
+ * http://www.juniper.net/support/legal/scriptlicense/
+ * Unless required by applicable law or otherwise agreed to in writing by the parties, software 
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+ * OF ANY KIND, either express or implied.
+ *
+ * This script outputs the customer average routes / vrf for each inet.0 and inet6.0 matching a starts-with() clause.
+ * ToDo : 
+ *      -  modify to allow flexible starts-with() match to allow for different L3VPN VRF naming standards.
+ *      -  write these values to utility-mib for tracking over time
+ * 
+ * root@mx> op routes_per_vrf
+ * VPN.*.inet.0 total routes : 109622
+ * VPN.*.inet.0 total tables : 1500
+ * VPN.*.inet.0 routes / vrf : 73.0813333333333
+ * 
+ * 
+ * VPN.*.inet6.0 total routes : 1500
+ * VPN.*.inet6.0 total tables : 1500
+ * VPN.*.inet6.0 routes / vrf : 1
+ *
+*/
+
+version 1.1;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ns str = "http://exslt.org/strings";
+/* You need include this ns to use set:distinct() */
+ns set = "http://exslt.org/sets";
+/* unique namespace used for PID checks function */
+ns jutils = "http://jutils/";
+
+
+import "../import/junos.xsl";
+
+
+/* open a control connection as we assume we'll be updating some MIBs during this script run */
+/* GLOBAL Scope */
+var $connection = jcs:open();
+
+match / {
+
+    <op-script-results> {
+
+        if( not( $connection )) {
+            expr jcs:syslog( $SYSLOG, $APPNAME _ ":ERROR: unable to connect to Junos API");
+            terminate;
+        }
+    
+        call check_pid;
+        
+        /* show route summary */
+        var $command="get-route-summary-information";
+        var $rt-summary-rpc = jcs:execute($connection, $command);
+
+        /* if response is empty then exit and terminate */
+        if (jcs:empty($rt-summary-rpc)) {
+                <xsl:message terminate="yes"> "Failure to read route tables";
+        }
+
+
+        /* sum up the route counts in each of the tables starting with 'VPN' for inet.0 */
+        var $route_count = sum($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet.0')]/active-route-count); 
+        var $table_count = count($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet.0')]/table-name);
+        <output> "VPN.*.inet.0 total routes : " _$route_count;
+        <output> "VPN.*.inet.0 total tables : " _$table_count;
+        var $routes_per_vrf = $route_count div $table_count;
+        <output> "VPN.*.inet.0 routes / vrf : " _$routes_per_vrf;
+        <output>;
+        <output>;
+        /* sum up the route counts in each of the tables starting with 'VPN' for inet.6 */
+        var $route_count_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet6.0')]/active-route-count); 
+        var $table_count_6 = count($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet6.0')]/table-name);
+        <output> "VPN.*.inet6.0 total routes : " _$route_count_6;
+        <output> "VPN.*.inet6.0 total tables : " _$table_count_6;
+        var $routes_per_vrf_6 = $route_count_6 div $table_count_6;
+        <output> "VPN.*.inet6.0 routes / vrf : " _$routes_per_vrf_6;        
+    }
+}
+
+
+
+template check_pid {
+    var $running_pid = jutils:running( $connection, $script );
+    if ( $running_pid ) {
+        <xsl:message terminate="yes"> "terminate script because another instance with pid " _ $running_pid _ " is still running";
+    }
+}
+
+template snmp_set($index, $value, $type = "string" ) {
+
+    var $set_rpc = <request-snmp-utility-mib-set> {
+        <object-type> $type;
+        <object-value> $value;
+        <instance> "krtTableInstance" _ ":" _ $index;
+    }
+    var $out = jcs:execute($connection, $set_rpc);
+    if ($out//xnm:error) {
+        <xsl:message terminate="yes"> "Error setting Utility MIB instance: " _ $results/..//xnm:error/message;
+    }    
+}
+
+template clear-all-mib () {
+    var $rpc-walk-mib = <rpc> {
+        /* jnxUtilStringValue.krtTableInstance: */
+        /* request snmp utility-mib clear object-type string instance krtTableInstance */
+        <command> "show snmp mib walk jnxUtilStringValue.107.114.116.84.97.98.108.101.73.110.115.116.97.110.99.101.58 ascii";
+    }
+    var $util-mib-set = jcs:execute($connection,$rpc-walk-mib);
+    for-each ($util-mib-set//snmp-object) {
+        call clear_util_mib($name=./index/index-value);
+    }
+}
+ 
+template clear_util_mib($name) {
+    var $clear-rpc = <request-snmp-utility-mib-clear> {
+        <object-type> "string";
+        <instance> $name;
+    }
+    var $out = jcs:execute($connection,$clear-rpc);
+}
+
+function jutils:file-exists( $filename ) {
+  var $ls_file = <file-list> { <path> $filename; }
+  var $ls_got = jcs:execute( $connection, $ls_file );
+  var $retval = boolean( $ls_got//file-information );
+  
+  result $retval;
+}
+
+function jutils:running( $connection, $script ) {
+    /* function to check if another instance of this script is still running
+     *
+     * :param connection: connection handle
+     * :param script: name used to identify the script
+     * :return: pid of running instance or false
+     */
+    mvar $running = false();
+ 
+    var $pid = <pid> $junos-context/pid;
+    var $pid_filename = "/mfs/var/tmp/" _ $script _ ".pid";
+    
+    /* pid_file won't exist on first run */
+    var $pid_file = document( $pid_filename );
+    
+    if ( not( jcs:empty( $pid_file//pid ) ) ) {
+        var $processes_rpc = { <command> "show system processes extensive"; }
+        var $processes := jcs:execute( $connection, $processes_rpc );
+        var $processes_lines = jcs:break-lines( $processes );
+ 
+        for-each( $processes_lines ) {
+            if ( jcs:regex( "^[[:blank:][:space:]]*" _ $pid_file//pid _ "[[:blank:][:space:]]+.*cscript.*", . )[1] ) {
+                set $running = true();
+            }
+        }
+    }
+    if ( $running ) {
+        result $pid_file//pid;
+    } else {
+        <xsl:document method="xml" href=$pid_filename append="no"> {
+            copy-of $pid;
+        }
+        result false();
+    }
+}
