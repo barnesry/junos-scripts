@@ -20,6 +20,7 @@ import re
 import argparse
 import logging
 import time
+from getpass import getpass
 from pprint import pprint
 from lxml import etree
 from jnpr.junos import Device
@@ -28,12 +29,33 @@ from jnpr.junos.exception import ConnectAuthError, LockError, ConfigLoadError, U
                                     CommitError, RpcError, ConnectTimeoutError
 
 debug = False
-commit_confirm_time = 1
+commit_confirm_time = 2
 commit_confirm_percentage = 0.8
+connect_timeout = 30    # in seconds
 
 host_file = '/etc/hosts'
 host_list = []
 
+def connect(host, user, password, timeout=connect_timeout):
+    try:
+        dev = Device(host=host, user=user, password=password, timeout=timeout)
+        logging.warning("Connecting : {}".format(dev.hostname))
+        dev.open()
+        logging.warning("Connected! : {}".format(dev.hostname))
+        return dev
+    except ConnectAuthError as f:
+        logging.error(" %s" % f)
+        new_auth = get_username_and_password()
+        user = new_auth['user']
+        password = new_auth['password']
+        dev = Device(host=host, user=user, password=password)
+        logging.warning("Connecting to {}".format(dev.hostname))
+        dev.open()
+        return dev
+    except ConnectTimeoutError as err:
+        logging.error("FAIL to connect to {} : {}".format(dev.hostname, err))
+        raise
+        
 def read_hosts():
     # read local hosts file and return all hostnames as a single python list
     try: 
@@ -58,8 +80,7 @@ def get_username_and_password():
     auth = {}
     print("Username: ")
     auth['user'] = input()
-    print("Password: ")
-    auth['password'] = input()
+    auth['password'] = getpass('Password: ')
 
     return dict(auth)
 
@@ -75,6 +96,34 @@ def read_config_file(filename):
     
     except FileNotFoundError:
         print("Can't open ConfigFile : {}".format(filename))
+
+def config_filetype(contents): 
+    ''' return one-of text or set based on simplistic check of configlet contents 
+        todo: check for xml and json
+    '''
+    # get number of lines
+    set_count = 0
+    line_count = config_length(contents)
+    
+    # check if we opened a 'set' format file
+    for line in contents.split("\n"):
+        if line.startswith('set'):
+            set_count += 1
+    # if the number of lines starting with 'set' are a high percentage of the file assume it's set format
+    # this is to account for possible inline comments in the file, so we'll still assume it's set
+    if set_count > 0 and (set_count / line_count) >= 0.8:
+        print(f"Detected Config Filetype : SET")
+        return "set"
+    else:
+        print(f"Detected Config Filetype : TEXT")
+        return "text"
+
+def config_length(contents):
+    ''' returns the number of lines in the config file we opened '''
+    for counter, line in enumerate(contents.split("\n")):
+        pass
+    return counter + 1
+    
 
 def read_diff_file(filename):
     '''Opens, reads and returns the corresponding .diff for the supplied configuration file'''
@@ -143,136 +192,125 @@ def main():
         # for anything matching our regex provided at the cli
         if re.match(target, hostname):
             
-            try:
-                dev = Device(host=hostname, user=user, password=password, timeout=30)
-                logging.warning("Connecting : {}".format(dev.hostname))
-                dev.open()
+            dev = connect(host=hostname, user=user, password=password, timeout=60)
 
-                # check which action we want to take based on args
-                if command:
-                    # we want to run a show command
-                    result = dev.rpc.cli(command)
-                    
-                    get_output = etree.XPath("//output/text()")
-                    # extract text from root <output> node
-                    output = get_output(result)[0]
-                    
-                    print(f'{hostname} : {output}')
-                    
-                elif configfile:
-                    # we want to push some config
-                    config = read_config_file(configfile)
-                    
-                    cu = Config(dev)
-                    try: 
-                        logging.warning("Locking configuration...")
-                        cu.lock()
-                    except LockError as err:
-                        print("FAIL : Unable to lock configuration : {}".format(err))
-                        return
+            # check which action we want to take based on args
+            if command:
+                # we want to run a show command
+                result = dev.rpc.cli(command)
+                
+                get_output = etree.XPath("//output/text()")
+                # extract text from root <output> node
+                output = get_output(result)[0]
+                
+                print(f'{hostname} : {output}')
+                
+            elif configfile:
+                # we want to push some config
+                config = read_config_file(configfile)
+                
+                cu = Config(dev)
+                try: 
+                    logging.warning("Locking configuration...")
+                    cu.lock()
+                except LockError as err:
+                    print("FAIL : Unable to lock configuration : {}".format(err))
+                    return
 
-                    try:
-                        logging.warning("Loading configlet...")
-                        cu.load(config, format="text")
-                    except ConfigLoadError as err:
-                        print("FAIL : Unable to load config: {}".format(err))
-                        cu.unlock()
-                        return
+                try:
+                    logging.warning("Loading configlet...")
+                    cu.load(config, format=config_filetype(config))
+                except ConfigLoadError as err:
+                    print("FAIL : Unable to load config: {}".format(err))
+                    cu.unlock()
+                    return
 
-                    # show the diff
-                    print(f'{dev.hostname} : DIFF')
+                # show the diff
+                print(f'{dev.hostname} : DIFF')
+                print(f'{"#"*20}')
+                diff = cu.diff()
+                if diff is not None:
+                    diff = diff.strip()
+                    print(diff)
+                else:
+                    print("No DIFF")
+
+                # if we supplied a file to compare
+                if diff_filename:
                     print(f'{"#"*20}')
-                    diff = cu.diff()
-                    if diff is not None:
-                        diff = diff.strip()
-                        print(diff)
-                    else:
-                        print("No DIFF")
+                    print("DIFF CHECK")
+                    print(f'{"#"*20}')
+                    expected_diff = read_diff_file(diff_filename).strip()
 
-                    # if we supplied a file to compare
-                    if diff_filename:
-                        print(f'{"#"*20}')
-                        print("DIFF CHECK")
-                        print(f'{"#"*20}')
-                        expected_diff = read_diff_file(diff_filename)
-
-                        if diff == expected_diff:
-                            proceed = True
-                            print("MATCH!! Proceeding with Commit.")
-                        else:
-                            diffmatch = False
-                            print("FAIL!! Expected...")
-                            print(expected_diff)
-                            print("Are you sure you want to ", end = '')
-                            proceed = should_we_continue()
+                    if diff == expected_diff:
+                        proceed = True
+                        print("MATCH!! Proceeding with Commit.")
+                    elif diff == None:
+                        # no diff, config is already the same thus we'll roll back
+                        logging.warning("Nothing to do for {}!".format(dev.hostname))
+                        proceed = False
                     else:
-                        # we should ask for permission to continue if no diffile is suppplied
+                        diffmatch = False
+                        print("FAIL!! Expected...")
+                        print(expected_diff)
+                        print("Are you sure you want to ", end = '')
                         proceed = should_we_continue()
+                else:
+                    # we should ask for permission to continue if no diffile is suppplied
+                    proceed = should_we_continue()
+                    
+
+                # wait for user to confirm it's OK to proceed after viewing diff
+                if proceed is False:
+                    logging.warning("Attempting rollback...")
+                    rollback_result = cu.rollback()
+                    if rollback_result:
+                        logging.warning("Rollback SUCCESS")
+                    else:
+                        logging.warning("Rollback FAILED")
+
+                    try :
+                        logging.warning("Unlocking Config")
+                        cu.unlock()
+                    except:
+                        logging.warning("Unlock FAILED")
+
+                # else assume we recieved the OK to proceed
+                else:
+                    try:
+                        logging.warning("COMMIT Confirmed={}...".format(commit_confirm_time))
+                        cu.commit(confirm=commit_confirm_time, timeout=commit_confirm_time*60*1.5, comment="COMMIT by jcs.py")
+                        
+                        logging.warning("Waiting for {} seconds before second commit attempt".format(
+                                        commit_wait_time()))
+                        time.sleep(commit_wait_time())
+                        cu.commit(comment="COMMIT CONFIRMED by jcs.py")
+                        logging.warning("SUCCESS : Commit")
+
+                        try:
+                            logging.warning("SUCCESS : Unlocking Config")
+                            cu.unlock()
+                        except UnlockError:
+                            logging.error("FAIL : Could not unlock config")
+                            return
+                    except CommitError as err:
+                        logging.error("FAIL : Could not commit : {}".format(err))
+                        return
                         
 
-                    # wait for user to confirm it's OK to proceed after viewing diff
-                    if proceed is False:
-                        logging.warning("Attempting rollback...")
-                        rollback_result = cu.rollback()
-                        if rollback_result:
-                            logging.warning("Rollback SUCCESS")
-                        else:
-                            logging.warning("Rollback FAILED")
-
-                        try :
-                            logging.warning("Unlocking Config")
-                            cu.unlock()
-                        except:
-                            logging.warning("Unlock FAILED")
-
-                    # else assume we recieved the OK to proceed
-                    else:
-                        try:
-                            logging.warning("COMMIT Confirmed={}...".format(commit_confirm_time))
-                            cu.commit(confirm=commit_confirm_time, comment="COMMIT by jcs.py")
-                            
-                            logging.warning("Waiting for {} seconds before second commit attempt".format(
-                                            commit_wait_time()))
-                            time.sleep(commit_wait_time())
-                            cu.commit(comment="COMMIT CONFIRMED by jcs.py")
-                            logging.warning("SUCCESS : Commit")
-
-                            try:
-                                logging.warning("SUCCESS : Unlocking Config")
-                                cu.unlock()
-                            except UnlockError:
-                                logging.error("FAIL : Could not unlock config")
-                                return
-                        except CommitError as err:
-                            logging.error("FAIL : Could not commit : {}".format(err))
-                            return
-                            
-
-                        except CommitError as err:
-                            print("FAIL : Could not commit : {}".format(err))
-                            cu.rollback()
-                            cu.unlock()
-                            return  
-                        except RpcError as err:
-                            print("FAIL : ncclient issues : {}".format(err))
-                            cu.rollback()
-                            cu.unlock()
-                            return
-                
-                logging.warning("CLOSING Connection : {}".format(hostname))
-                dev.close()
+                    except CommitError as err:
+                        print("FAIL : Could not commit : {}".format(err))
+                        cu.rollback()
+                        cu.unlock()
+                        return  
+                    except RpcError as err:
+                        print("FAIL : ncclient issues : {}".format(err))
+                        cu.rollback()
+                        cu.unlock()
+                        return
             
-            except ConnectAuthError as f:
-                logging.error(" %s" % f)
-                new_auth = get_username_and_password()
-                user = new_auth['user']
-                password = new_auth['password']
-                dev = Device(host=target, user=user, password=password)
-                logging.warning("Connecting to {}".format(dev.hostname))
-                dev.open()
-            except ConnectTimeoutError as err:
-                logging.error("FAIL to connect to {} : {}".format(dev.hostname, err))
-                continue
+            logging.warning("CLOSING Connection : {}".format(hostname))
+            dev.close()
 
 
 if __name__ == "__main__":
