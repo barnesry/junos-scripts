@@ -166,7 +166,7 @@ def main():
     parser.add_argument('--password', required=True, dest='password', help='password for target host')
     parser.add_argument('--command', required=False, dest='command', help='command to execute on host')
     parser.add_argument('--config_file', required=False, dest='config_file', help='configlet to push to host')
-    parser.add_argument('--config_load', required=False, dest='config_load', help='[merge|update|patch] default=replace')
+    parser.add_argument('--config_load', required=False, dest='config_load', help='[overwrite|merge|update|patch] default=replace')
     parser.add_argument('--diff_file', required=False, dest='diff_file', help='diff file to compare for auto-proceed')
     parser
     args = parser.parse_args()
@@ -183,12 +183,13 @@ def main():
         configfile = ''
 
     # validate our input from cli
-    if args.config_load in ['merge', 'update', 'patch']:
-        ''' build kwargs for either merge|update|patch = True to pass to config_load '''
-        configload = { args.config_load : True }
-    else:
-        print(f'!!ERROR!! Failed input validation : {args.config_load}')
-        sys.exit(1)
+    if args.config_load:
+        if ars.config_load in ['overwrite', 'merge', 'update', 'patch']:
+            ''' build kwargs for either merge|update|patch = True to pass to config_load '''
+            configload = { args.config_load : True }
+        else:
+            print(f'!!ERROR!! Failed input validation : {args.config_load}')
+            sys.exit(1)
 
     if args.diff_file:
         diff_filename = args.diff_file
