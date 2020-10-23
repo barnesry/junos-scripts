@@ -30,6 +30,7 @@ from jnpr.junos.utils.config import Config
 from jnpr.junos.exception import ConnectAuthError, LockError, ConfigLoadError, UnlockError, \
                                     CommitError, RpcError, ConnectTimeoutError
 
+
 debug = False
 commit_confirm_time = 2
 commit_confirm_percentage = 0.8
@@ -37,6 +38,7 @@ connect_timeout = 30    # in seconds
 
 host_file = '/etc/hosts'
 host_list = []
+
 
 def connect(host, user, password, timeout=connect_timeout):
     try:
@@ -168,26 +170,42 @@ def validate_target(target):
         # will throw a ValueError if supplied target isn't a valid IP
         target = ipaddress.ip_address(str(target))
         return [ str(target) ]
+        print("Attempting Connect to {}...".format(str(target)))
     except ValueError:
-        # if it's not a valid IP, then look in our hosts file to resolve and return a list of matches
-        return read_hosts(target)
+        # if it's not a valid IP, check our local /etc/hosts file to resolve and return a list of wildcard matches
+        hosts = read_hosts(target)
+
+        if len(hosts) == 0:
+            # we didn't match anything in local /etc/hosts so it might be a 
+            # hostname that needs to use default system resolver
+            # return user supplied target w/o further validation for connection attempt
+            print("Attempting Connection to ...{}".format(target))
+            return [ target ]
+        else:
+            # return an array of hosts matched in /etc/hosts
+            print("Attempting Connection(s) to ...{}".format(hosts))
+            return hosts
+
 
 def main():
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target', required=True, dest='target', help='Target host(s) to connect to based on regex')
+    parser.add_argument('--target', required=False, dest='target', help='Target hostname or IP to connect to')
+    parser.add_argument('--wildcard', required=False, dest='wildcard', help='Target hostname(s) to connect to based on regex culled from local /etc/hosts file')
     parser.add_argument('--user', required=True, dest='user', help='username to connect with')
-    parser.add_argument('--password', required=True, dest='password', help='password for target host')
+    parser.add_argument('--password', required=False, dest='password', help='password for target host')
     parser.add_argument('--command', required=False, dest='command', help='command to execute on host')
     parser.add_argument('--config_file', required=False, dest='config_file', help='configlet to push to host')
     parser.add_argument('--config_load', required=False, dest='config_load', help='[overwrite|merge|update|patch] default=replace')
     parser.add_argument('--diff_file', required=False, dest='diff_file', help='diff file to compare for auto-proceed')
+    parser.add_argument('--jumphost', required=False, dest='jumphost', help='ssh-proxy jump hostname')
     parser
     args = parser.parse_args()
 
     user = args.user
 
-    password = args.password
+
+    # decide if we're pushing config or collecting show data
     if args.command:
         command = args.command
     else:
@@ -197,9 +215,11 @@ def main():
     else:
         configfile = ''
 
-    # get our list of devices to operate against
-    hostlist = validate_target(args.target)
 
+    # get our list of devices to operate against if wildcard supplied
+    hostlist = validate_target(args.target)
+    
+    
     # validate our input from cli
     if args.config_load:
         if ars.config_load in ['overwrite', 'merge', 'update', 'patch']:
@@ -216,6 +236,11 @@ def main():
     
     proceed = False
 
+    # check if password supplied else we'll collect it at runtime
+    if args.password:
+        password = args.password
+    else:
+        password = getpass('Password: ')
 
     for hostname in hostlist:
             
