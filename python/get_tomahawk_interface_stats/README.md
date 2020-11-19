@@ -1,4 +1,7 @@
-This script
+This script is designed to help provide visibility for Broadcom Tomahawk based QFX5200 systems to display the logical ASIC to Physical port mapping along with the associated pipeline each port is associated with. This association is important when monitoring drop performance with PFC/ECN or RoCEv2 as ingress headroom buffers are carved up across four separate processing pipes so providing visibility into both ingress and egress traffic paths and associated buffer pools is important.
+
+This script also polls the low level logical port counters from within the Broadcom shell not accessible from the Junos CLI for 'DROP_PKT_ING' or 'ingress_hw_drops'  which are only present during ingress traffic congestion and active dropping. The presence of active counters here indicates lossless traffic is being dropped in the ingress pipeline as a result of insufficient headroom buffer allocation to absorb inflight traffic before either ECN or PFC has affected the inbound traffic volume(s).
+
 
     mbp:interface-stats $ ./get_interface_stats.py --host qfx5200-1 --user labuser --interval 10
     Password:
