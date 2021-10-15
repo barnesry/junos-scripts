@@ -1,5 +1,7 @@
-/* Author : Ryan Barnes (barnesry@juniper.net)
- * Date   : 15-March-2019
+/* Author  : Ryan Barnes (barnesry@juniper.net)
+ * Date    : 15-March-2019
+ * Updated : 15-Oct-2021 :  update to take vrf prefix into the script as a parameter. 
+                            added protocol breakdown per family and associated formatting changes. 
  *
  * Copyright 2017 Juniper Networks, Inc. All rights reserved.
  * Licensed under the Juniper Networks Script Software License (the "License"). 
@@ -10,19 +12,52 @@
  * OF ANY KIND, either express or implied.
  *
  * This script outputs the customer average routes / vrf for each inet.0 and inet6.0 matching a starts-with() clause.
+ * The primary purpose of this script is to help estimate approximate scale per routing-instance for test estimation purposes
+ *
+ *
  * ToDo : 
- *      -  modify to allow flexible starts-with() match to allow for different L3VPN VRF naming standards.
+ *      -  modify to allow flexible starts-with() match to allow for different L3$prefix VRF naming standards. [completed Oct-2021]
  *      -  write these values to utility-mib for tracking over time
  * 
- * root@mx> op routes_per_vrf
- * VPN.*.inet.0 total routes : 109622
- * VPN.*.inet.0 total tables : 1500
- * VPN.*.inet.0 routes / vrf : 73.0813333333333
+ * root@mx> op routes_per_vrf prefix vrf-
+ * vrf-.*.inet.0 total tables : 1000
+ * 
+ * SUM of inet.0 routes in all instances starting with vrf-
+ *     sum local routes      : 6000
+ *     sum direct routes     : 6000
+ *     sum static routes     : 17003
+ *     sum bgp routes        : 1866049
+ *     --------------------------------------------
+ *     sum ALL routes types  : 1895052
  * 
  * 
- * VPN.*.inet6.0 total routes : 1500
- * VPN.*.inet6.0 total tables : 1500
- * VPN.*.inet6.0 routes / vrf : 1
+ * Average routes/vrf for inet.0 instances starting with vrf-
+ *     local/vrf   : 6
+ *     direct/vrf  : 6
+ *     static/vrf  : 17
+ *     bgp/vrf     : 1866
+ *     --------------------------------------------
+ *     all / vrf    : 1895
+ * 
+ * 
+ * $prefix.*.inet6.0 total tables : 1000
+ * 
+ * SUM of inet6.0 routes in all instances starting with vrf-
+ *     local routes        : 8100
+ *     direct routes       : 6000
+ *     static routes       : 32000
+ *     bgp routes          : 51000
+ *     --------------------------------------------
+ *     sum ALL route types : 98100
+ * 
+ * 
+ * Average routes/vrf for inet6.0 instances starting with vrf-
+ *     local/vrf  : 8
+ *     direct/vrf : 6
+ *     static/vrf : 32
+ *     bgp/vrf    : 51
+ *     --------------------------------------------
+ *     all / vrf  : 98
  *
 */
 
@@ -39,6 +74,15 @@ ns jutils = "http://jutils/";
 
 
 import "../import/junos.xsl";
+
+/* these arguments are imported into JUNOS as a CLI option */
+var $arguments = {
+    <argument> {
+        <name> "prefix";
+        <description> "Starting prefix of all tables matching this expression. (eg. $prefix.*  or vrf.* or Customer.*)";
+    }
+}
+param $prefix;
 
 
 /* open a control connection as we assume we'll be updating some MIBs during this script run */
@@ -66,22 +110,73 @@ match / {
         }
 
 
-        /* sum up the route counts in each of the tables starting with 'VPN' for inet.0 */
-        var $route_count = sum($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet.0')]/active-route-count); 
-        var $table_count = count($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet.0')]/table-name);
-        <output> "VPN.*.inet.0 total routes : " _$route_count;
-        <output> "VPN.*.inet.0 total tables : " _$table_count;
-        var $routes_per_vrf = $route_count div $table_count;
-        <output> "VPN.*.inet.0 routes / vrf : " _$routes_per_vrf;
+        /* sum up the route counts in each of the tables starting with $prefix for inet.0 */
+        var $route_count = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet.0')]/active-route-count); 
+        var $route_count_bgp = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet.0')]/protocols[protocol-name == 'BGP']/active-route-count);
+        var $route_count_local = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet.0')]/protocols[protocol-name == 'Local']/active-route-count);
+        var $route_count_static = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet.0')]/protocols[protocol-name == 'Static']/active-route-count);
+        var $route_count_direct = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet.0')]/protocols[protocol-name == 'Direct']/active-route-count);
+        var $table_count = count($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet.0')]/table-name);
+        <output> $prefix _ ".*.inet.0 total tables : " _$table_count;
+        <output>;
+        <output> "SUM of inet.0 routes in all instances starting with " _$prefix;
+        <output> "    sum local routes      : " _$route_count_local;
+        <output> "    sum direct routes     : " _$route_count_direct;
+        <output> "    sum static routes     : " _$route_count_static;
+        <output> "    sum bgp routes        : " _$route_count_bgp;
+        <output> "    --------------------------------------------";
+        <output> "    sum ALL routes types  : " _$route_count;
         <output>;
         <output>;
-        /* sum up the route counts in each of the tables starting with 'VPN' for inet.6 */
-        var $route_count_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet6.0')]/active-route-count); 
-        var $table_count_6 = count($rt-summary-rpc//route-table[starts-with(table-name, 'VPN') and contains(table-name, 'inet6.0')]/table-name);
-        <output> "VPN.*.inet6.0 total routes : " _$route_count_6;
-        <output> "VPN.*.inet6.0 total tables : " _$table_count_6;
-        var $routes_per_vrf_6 = $route_count_6 div $table_count_6;
-        <output> "VPN.*.inet6.0 routes / vrf : " _$routes_per_vrf_6;        
+        
+        var $routes_per_vrf = round($route_count div $table_count);
+        var $routes_per_vrf_local = round($route_count_local div $table_count);
+        var $routes_per_vrf_direct = round($route_count_direct div $table_count);
+        var $routes_per_vrf_static = round($route_count_static div $table_count);
+        var $routes_per_vrf_bgp = round($route_count_bgp div $table_count);
+        <output> "Average routes/vrf for inet.0 instances starting with " _$prefix;
+        <output> "    local/vrf   : " _$routes_per_vrf_local;
+        <output> "    direct/vrf  : " _$routes_per_vrf_direct;
+        <output> "    static/vrf  : " _$routes_per_vrf_static;
+        <output> "    bgp/vrf     : " _$routes_per_vrf_bgp;
+        <output> "    --------------------------------------------";
+        <output> "    all / vrf    : " _$routes_per_vrf;
+        <output>;
+        <output>;
+
+
+        /* sum up the route counts in each of the tables starting with $prefix for inet.6 */
+        var $table_count_6 = count($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet6.0')]/table-name);
+        var $route_count_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet6.0')]/active-route-count); 
+        var $route_count_bgp_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet6.0')]/protocols[protocol-name == 'BGP']/active-route-count); 
+        var $route_count_local_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet6.0')]/protocols[protocol-name == 'Local']/active-route-count); 
+        var $route_count_static_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet6.0')]/protocols[protocol-name == 'Static']/active-route-count); 
+        var $route_count_direct_6 = sum($rt-summary-rpc//route-table[starts-with(table-name, $prefix) and contains(table-name, 'inet6.0')]/protocols[protocol-name == 'Direct']/active-route-count); 
+        <output> $prefix _ ".*.inet6.0 total tables : " _$table_count_6;
+        <output>;
+        <output> "SUM of inet6.0 routes in all instances starting with " _$prefix;
+        <output> "    local routes        : " _$route_count_local_6;
+        <output> "    direct routes       : " _$route_count_direct_6;
+        <output> "    static routes       : " _$route_count_static_6;
+        <output> "    bgp routes          : " _$route_count_bgp_6;
+        <output> "    --------------------------------------------";
+        <output> "    sum ALL route types : " _$route_count_6;
+        <output>;
+        <output>;
+
+        var $routes_per_vrf_6 = round($route_count_6 div $table_count_6);
+        var $routes_per_vrf_local_6 = round($route_count_local_6 div $table_count);
+        var $routes_per_vrf_direct_6 = round($route_count_direct_6 div $table_count);
+        var $routes_per_vrf_static_6 = round($route_count_static_6 div $table_count);
+        var $routes_per_vrf_bgp_6 = round($route_count_bgp_6 div $table_count);              
+        <output> "Average routes/vrf for inet6.0 instances starting with " _$prefix;
+        <output> "    local/vrf  : " _$routes_per_vrf_local_6;
+        <output> "    direct/vrf : " _$routes_per_vrf_direct_6;
+        <output> "    static/vrf : " _$routes_per_vrf_static_6;
+        <output> "    bgp/vrf    : " _$routes_per_vrf_bgp_6;
+        <output> "    --------------------------------------------";
+        <output> "    all / vrf  : " _$routes_per_vrf_6;
+        <output>;  
     }
 }
 
