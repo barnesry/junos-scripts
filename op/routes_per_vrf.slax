@@ -19,6 +19,7 @@
  * ToDo : 
  *      -  modify to allow flexible starts-with() match to allow for different L3$prefix VRF naming standards. [completed Oct-2021]
  *      -  write these values to utility-mib for tracking over time
+ *      -  accomodate UUID style VRF naming (:alpha:) for match (character types + desired length)
  * 
  * root@mx> op routes_per_vrf prefix vrf-
  * vrf-.*.inet.0 total tables : 1000
