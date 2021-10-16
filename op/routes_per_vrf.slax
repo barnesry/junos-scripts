@@ -11,8 +11,9 @@
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
  * OF ANY KIND, either express or implied.
  *
+ * Developed to help derive per customer route distribution where each customer is configured in a respective VRF.
  * This script outputs the customer average routes / vrf for each inet.0 and inet6.0 matching a starts-with() clause.
- * The primary purpose of this script is to help estimate approximate scale per routing-instance for test estimation purposes
+ * The primary purpose of this script is to help estimate approximate scale per routing-instance for current and future growth.
  *
  *
  * ToDo : 
@@ -40,7 +41,7 @@
  *     all / vrf    : 1895
  * 
  * 
- * $prefix.*.inet6.0 total tables : 1000
+ * vrf-.*.inet6.0 total tables : 1000
  * 
  * SUM of inet6.0 routes in all instances starting with vrf-
  *     local routes        : 8100
