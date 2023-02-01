@@ -1,0 +1,13 @@
+{
+    "queryEOXProductRequest": {
+        "appId": "{{ appid }}",
+        "requestDateTime": "{{ current_timestamp }}",
+        "customerUniqueTransactionID": "{{ customer_unique_transaction_id }}",
+        "customerSourceID": "{{ customer_source_id }}",
+        "eoxProduct": [
+            {%- for sku in sku_list %}
+            "{{ sku }}"{% if not loop.last %},{% endif %}
+            {%- endfor %}
+        ]
+    }
+}
