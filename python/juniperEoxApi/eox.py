@@ -28,6 +28,7 @@ import json
 import argparse
 from pandas import DataFrame, read_csv
 import pandas as pd
+import logging
 
 # allows us to build our web query
 from jinja2 import Environment, PackageLoader, select_autoescape
@@ -100,10 +101,21 @@ class EoxApi():
         headers = { "Content-Type": "application/json", 
                     "Accept": "application/json" }
         
-        # debug
-        # print(request_body)
+        
+        logging.info("Request Body to send...")
+        logging.info(request_body)
         
         self.response = self.client.post(uri, data=request_body, headers=headers)
+        
+        logging.info(self.response.json())
+        logging.info(self.response.status_code)
+        
+        if not self.response.status_code == 200:
+            quit(f'ERROR retrieving data from API!! \n \
+                Status Code : {self.response.status_code}')
+        if self.response.status_code == 200 and self.response.json()["queryEOXProductResponse"]["fault"]:
+            quit(f'ERROR retrieving data from API!! \n {self.response.json()["queryEOXProductResponse"]["fault"]}')
+
         return self.response.json()
 
     def __to_df(self):
@@ -147,6 +159,11 @@ class EoxApi():
 
         # Create our DataFrame from our list
         df = pd.DataFrame(data)
+       
+        logging.info("")
+        logging.info("** Imported Table **")
+        logging.info(df)
+        
         return df
 
     def to_table(self):
@@ -239,27 +256,33 @@ def generate_unique_transaction_id(random_range):
 # execute only if called directly (not as a module)
 if __name__ == "__main__":
 
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--inputfile', required=True, dest='inputfile', help='.xls file to open')
-    parser.add_argument('--outputfile', required=True, dest='outputfile', help='.xls file to write to')
+    parser.add_argument('--outputfile', required=False, dest='outputfile', help='.xls file to write to')
     parser.add_argument('--outformat', required=True, dest='outformat', help='dump to screen in tab format or write to excel')
+    parser.add_argument('-v', '--verbose', help="print more helpful data to screen for debugging",
+                        action="store_const",
+                        dest="loglevel",
+                        const=logging.INFO)
     parser
     args = parser.parse_args()
+    logging.basicConfig(level=args.loglevel)
 
-    
+    if args.outformat == 'excel' and args.outputfile is None:
+        parser.error('The --outformat excel argument requires that --outputfile be defined!')
     
     # open input/yourinputfile.xls
     if os.path.exists(args.inputfile):
         inputfile = args.inputfile
 
-    # write to output/yourfile.xlsx
-    if args.outputfile.endswith('xlsx'):
-        if not os.path.exists('output'):
-            os.makedirs('output')
-        outputfile = os.path.join('output', args.outputfile)     
-    else:
-        quit("Excel format export only supports .xlsx!!")
+    # write to output/yourfile.xlsx if defined
+    if args.outputfile:
+        if args.outputfile.endswith('xlsx'):
+            if not os.path.exists('output'):
+                os.makedirs('output')
+            outputfile = os.path.join('output', args.outputfile)     
+        else:
+            quit("Excel format export only supports .xlsx!!")
 
 
     # generate our execution timestamp eg. "Jan 2023" for inclusion in our output table
@@ -268,6 +291,8 @@ if __name__ == "__main__":
     # read the customer provided file and parse out the interesting column to get our SKUs to query
     #file = r'input/customer_sku_file_feb_2023.xlsx'
     df = pd.read_excel(inputfile)
+
+    logging.info(df)
 
     # find and strip the SKU list from the resulting import
     sku_list = (df['Part Number']).to_list()
