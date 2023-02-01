@@ -11,6 +11,9 @@
 # Screen output is tab separated and should be copy/pasteable directly into excel for further adjustment
 # Excel format currently adheres to a specific format and is translated at export to this format.
 #
+# Example:
+# python3 eox.py --inputfile input/eol_sku_list.xlsx --outputfile eol_result.xlsx --outformat screen
+#
 # barnesry@ 2023-Jan-30
 #
 
@@ -133,6 +136,7 @@ class EoxApi():
             except:
                 replacement_part = "N/A"   
                 
+            # append our new row
             data.append( { 'EoX Product' : eox_product,
                             'EoL Announce Date' : eol_announce_date, 
                             'Last Order Date' : last_order_date,
@@ -141,7 +145,7 @@ class EoxApi():
                             'EndOfSupport' : end_of_support_date,
                             'ReplacementPart' : replacement_part } )
 
-        # Create our Pandas DataFrame
+        # Create our DataFrame from our list
         df = pd.DataFrame(data)
         return df
 
@@ -188,6 +192,8 @@ class EoxApi():
                         'EO Useful Life' : 'EndOfSupport' 
                     }
 
+        # not quite the same mapping in reverse so we're missing a couple column mappings which we'll fill
+        # in with "N/A" before export
         header_map_inverse = {  'EoX Product' : 'Part Number',
                                 'EoL Announce Date' : 'EO Sale Notification',
                                 'Last Order Date' : 'EO Sale Date(Actual)',
@@ -197,10 +203,12 @@ class EoxApi():
         
         data = self.__to_df()
 
+        # inserting generic columns we want in the final output
         data.insert(0, 'Manufacturer', 'JUNIPER')
         data.insert(2, 'Update Month', current_date)
         data.insert(5, 'EO Sale Date(Estimate)', "N/A")
         data.insert(7, 'EO Security Vulnerability Fixes', "N/A")
+        # rename the header row using our map dict
         data.rename(columns=header_map_inverse, errors="raise", inplace=True)
 
         result = data.to_excel(outfilename, index=False, header=True)
@@ -247,7 +255,9 @@ if __name__ == "__main__":
 
     # write to output/yourfile.xlsx
     if args.outputfile.endswith('xlsx'):
-        outputfile = os.path.join('output', args.outputfile)
+        if not os.path.exists('output'):
+            os.makedirs('output')
+        outputfile = os.path.join('output', args.outputfile)     
     else:
         quit("Excel format export only supports .xlsx!!")
 
