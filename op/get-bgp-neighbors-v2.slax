@@ -63,7 +63,7 @@ match / {
 
     /* Parse our peerIP+port into an IP only (need to confirm ipv6 matching as well) */
     /* var $peer-regex = "^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)";  V4 only... */
-    var $peer-regex = "^([0-9\.\:]+)\+";
+    var $peer-regex = "^([0-9a-z\.\:]+)\+";
 
 
     var $peer-table := {
