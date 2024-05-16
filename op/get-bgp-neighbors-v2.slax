@@ -9,10 +9,12 @@
  *          Supports IPv4 inet.0 RIB values, sorting of columns
  *  v0.2    Updated to support reporting of peer-group available in 17.4 output
             rather than having to pull from config directly
+    v0.3    Updates to improve peers with multiple-address families (barnesry@ 5/15/2024)
  *
- * barnesry@vSRX-1> op get-bgp-neighbors
- * Peer            ASN   Group                Description               Flaps Rcvd/Acpt/Adv         Last Up/Down State
- * 10.0.0.2        65002 EBGP                                           8     7/7/7                   5d 9:55:46 Established
+ * user@router> op get_bgp_summary
+ * Peer                      ASN   Peer-Group           Description               Flaps Table      Rcvd/Acpt/Adv         Last Up/Down State
+ * 3.142.223.1               174   transit_v4           Cogent IPv4 AS174         0     inet.0     931462/266121/4            7:08:05 Established
+ * 52.155.55.1               4689  peers_v4             Twitch AS46489            11    inet.0     9/9/4                 10w5d 15:33: Established                                          8     7/7/7                   5d 9:55:46 Established
  */
 
 version 1.0;
@@ -73,52 +75,59 @@ match / {
       var $regex-result = jcs:regex($peer-regex, peer-address);
       var $peer-ip = $regex-result[2];
 
-      /* slax 1.0 doesn't support terniary assignment..so here we are :-( */
-      var $received-routes = {
-	      if (bgp-rib [name='inet.0']/received-prefix-count) {
-	        expr bgp-rib [name='inet.0']/received-prefix-count;
-        } else {
-	        expr 0;
-        }
-      }
+      /* build a separate line item for every address-family per peer */
+      for-each ( bgp-rib ) {
 
-      var $accepted-routes = {
-        if (bgp-rib [name='inet.0']/accepted-prefix-count) {
-          expr bgp-rib [name='inet.0']/accepted-prefix-count;
-        } else {
-          expr 0;
-        }
-      }
+        var $table-name = name;
 
-      var $advertised-routes = {
-        if (bgp-rib [name='inet.0']/advertised-prefix-count) {
-          expr bgp-rib [name='inet.0']/advertised-prefix-count;
-        } else {
-          expr 0;
+        /* slax 1.0 doesn't support terniary assignment..so here we are :-( */
+        var $received-routes = {
+          if ( received-prefix-count) {
+            expr received-prefix-count;
+          } else {
+            expr 0;
+          }
         }
-      }
 
-        <bgp-peer> {
-          <peer-address> $peer-ip;
-          <description> description;
-          <peer-group> peer-group;
-          <peer-as> peer-as;
-          <received-routes> $received-routes;
-          <accepted-routes> $accepted-routes;
-          <advertised-routes> $advertised-routes;
-          /* <received-routes> (bgp-rib [name='inet.0']/received-prefix-count) ? bgp-rib [name='inet.0']/received-prefix-count : 0; */
-          /* <accepted-routes> (bgp-rib [name='inet.0']/accepted-prefix-count) ? bgp-rib [name='inet.0']/accepted-prefix-count : 0; */
-          /* <advertised-routes> (bgp-rib [name='inet.0']/advertised-prefix-count) ? bgp-rib [name='inet.0']/advertised-prefix-count : 0; */
-          <flap-count> flap-count;
-          <elapsed-time> $results2/bgp-peer [peer-address=$peer-ip]/elapsed-time;
-          <elapsed-time-seconds> $results2/bgp-peer [peer-address=$peer-ip]/elapsed-time/@junos:seconds;
-          <peer-state> peer-state;
+        var $accepted-routes = {
+          if (accepted-prefix-count) {
+            expr accepted-prefix-count;
+          } else {
+            expr 0;
+          }
+        }
+
+        var $advertised-routes = {
+          if (advertised-prefix-count) {
+            expr advertised-prefix-count;
+          } else {
+            expr 0;
+          }
+        }
+
+          <bgp-peer> {
+            <peer-address> $peer-ip;
+            <description> ./parent::node()/description;
+            <peer-group> ./parent::node()/peer-group;
+            <peer-as> ./parent::node()/peer-as;
+            <table-name> $table-name;
+            <received-routes> $received-routes;
+            <accepted-routes> $accepted-routes;
+            <advertised-routes> $advertised-routes;
+            /* <received-routes> (bgp-rib [name='inet.0']/received-prefix-count) ? bgp-rib [name='inet.0']/received-prefix-count : 0; */
+            /* <accepted-routes> (bgp-rib [name='inet.0']/accepted-prefix-count) ? bgp-rib [name='inet.0']/accepted-prefix-count : 0; */
+            /* <advertised-routes> (bgp-rib [name='inet.0']/advertised-prefix-count) ? bgp-rib [name='inet.0']/advertised-prefix-count : 0; */
+            <flap-count> ./parent::node()/flap-count;
+            <elapsed-time> $results2/bgp-peer [peer-address=$peer-ip]/elapsed-time;
+            <elapsed-time-seconds> $results2/bgp-peer [peer-address=$peer-ip]/elapsed-time/@junos:seconds;
+            <peer-state> ./parent::node()/peer-state;
+          }
         }
       }
     }
 
     /* Print our Headers */
-    <output> jcs:printf("%-15s %-5s %-20.20s %-25s %-5s %-21s %-12s %-15s","Peer","ASN","Peer-Group","Description","Flaps","Rcvd/Acpt/Adv","Last Up/Down","State" );
+    <output> jcs:printf("%-25.20s %-5s %-20.20s %-25s %-5s %-10s %-21s %-12s %-15s","Peer","ASN","Peer-Group","Description","Flaps","Table","Rcvd/Acpt/Adv","Last Up/Down","State" );
 
     /* Check if we wanted to sort the table before we print it out */
     if( not ( jcs:empty ( $sortby ) ) ) {
@@ -126,33 +135,33 @@ match / {
       if ( $sortby == 'flaps' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="flap-count" order="descending" data-type="number">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-25.25s %-5.5s %-20.20s %-25.25s %-5.5s %-10.10s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, table-name, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'state' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="peer-state" order="ascending">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-25.25s %-5.5s %-20.20s %-25.25s %-5.5s %-10s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, table-name, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'description' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="description" order="ascending">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-25.25s %-5.5s %-20.20s %-25.25s %-5.5s %-10s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, table-name, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'updown' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="elapsed-time-seconds" order="descending" data-type="number">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-25.25s %-5.5s %-20.20s %-25.25s %-5.5s %-10s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, table-name, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       } else if ( $sortby == 'group' ) {
         for-each ( $peer-table/bgp-peer ) {
           <xsl:sort select="group" order="ascending">;
-          <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+          <output> jcs:printf("%-25.25s %-5.5s %-20.20s %-25.25s %-5.5s %-10s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, table-name, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
         }
       }
     }
     else {
       for-each ( $peer-table/bgp-peer ) {
-        <output> jcs:printf("%-15.15s %-5.5s %-20.20s %-25.25s %-5.5s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
+        <output> jcs:printf("%-25.25s %-5.5s %-20.20s %-25.25s %-5.5s %-10s %-21.21s %12.12s %-15.15s", peer-address, peer-as, peer-group, description, flap-count, table-name, concat(received-routes,"/",accepted-routes,"/",advertised-routes), elapsed-time, peer-state );
       }
     }
 
