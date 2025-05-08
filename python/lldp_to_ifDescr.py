@@ -52,9 +52,8 @@ def main():
         # build out list of scoped interfaces to get description updates
         interface_updates = []
         for i in interface_list:
-            name = lldp_neighbors[i.text]
             description = f'INT::{lldp_neighbors[i.text]["remote_system_name"]}::{lldp_neighbors[i.text]["remote_port_description"]}'
-            interface_updates.append( { "name": i.text, "description": lldp_neighbors[i.text]["remote_system_name"] } )
+            interface_updates.append( { "name": i.text, "description": description } )
 
         print(f'Updating the following interfaces based on gathered LLDP information')
         print(interface_updates)
